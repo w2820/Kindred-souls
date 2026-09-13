@@ -36551,6 +36551,91 @@ if (_cancelEnvEl) _cancelEnvEl.addEventListener('click', () => {
             return lastError;
         };
 
+        /* ===== 通用「文字样式」：放大 / 加粗 / 调整位置 =====
+           各小组件内部 HTML 千差万别，无法靠固定类名覆盖，
+           因此改为遍历真实 DOM 找出真正承载文字的元素，直接写 inline style，
+           这样对任何小组件（含用户自定义的）都生效。 */
+        const collectTextEls = (holder) => {
+            const out = [];
+            if (!holder) return out;
+            let all = [];
+            try { all = holder.querySelectorAll('*'); } catch (e) { return out; }
+            for (let i = 0; i < all.length; i++) {
+                const el = all[i];
+                const tn = (el.tagName || '').toUpperCase();
+                if (tn === 'SCRIPT' || tn === 'STYLE' || tn === 'SVG' || tn === 'PATH' || tn === 'TEXT') continue;
+                /* 跳过 svg 内部（转盘扇区文字等），放大它们会破坏图形布局 */
+                try { if (el.ownerSVGElement || (el.closest && el.closest('svg'))) continue; } catch (e) {}
+                let txt = '';
+                const kids = el.childNodes;
+                for (let j = 0; j < kids.length; j++) {
+                    const nd = kids[j];
+                    if (nd.nodeType === 3) txt += (nd.nodeValue || '');
+                }
+                if (!txt.trim()) continue;
+                const cs = getComputedStyle(el);
+                if (!cs || cs.display === 'none' || cs.visibility === 'hidden' || cs.opacity === '0') continue;
+                /* 注意：不要用 getBoundingClientRect 判空 —— 组件刚插入、尚未完成布局时
+                   尺寸可能还是 0，会把正常的文字元素全部误判为隐藏而跳过 */
+                let bottom = 0;
+                try { const r = el.getBoundingClientRect(); bottom = (r && r.bottom) || 0; } catch (e) {}
+                out.push({ el: el, fs: parseFloat(cs.fontSize) || 0, bottom: bottom, top: 0 });
+            }
+            return out;
+        };
+
+        const applyWidgetTextStyle = (holder, d) => {
+            if (!holder || !d) return;
+            const scope = d.__tsScope || 'main';
+            const size = parseInt(d.__tsSize, 10);
+            const weight = parseInt(d.__tsWeight, 10);
+            const dy = parseInt(d.__tsDy, 10) || 0;
+            const dx = parseInt(d.__tsDx, 10) || 0;
+            const hasSize = !isNaN(size) && size > 0 && size !== 100;
+            const hasWeight = !isNaN(weight) && weight > 0;
+            if (!hasSize && !hasWeight && !dy && !dx) return;
+            let list = [];
+            try { list = collectTextEls(holder); } catch (e) { return; }
+            if (!list.length) return;
+
+            let targets = list;
+            if (scope === 'main') {
+                /* 主文字：字号最大的那一批（转盘的结果文字就属于这类） */
+                let mx = 0;
+                list.forEach(x => { if (x.fs > mx) mx = x.fs; });
+                targets = list.filter(x => x.fs >= mx - 0.7);
+            } else if (scope === 'bottom') {
+                /* 底部文字：位置最靠下的那一批 */
+                let mb = -Infinity;
+                list.forEach(x => { if (x.bottom > mb) mb = x.bottom; });
+                targets = list.filter(x => x.bottom >= mb - 14);
+            }
+
+            targets.forEach(x => {
+                const el = x.el;
+                try {
+                    /* 基准字号只在首次记录，避免重复叠加放大 */
+                    if (!el.dataset.mcwFs) el.dataset.mcwFs = String(x.fs || parseFloat(getComputedStyle(el).fontSize) || 14);
+                    const base = parseFloat(el.dataset.mcwFs) || 14;
+                    if (hasSize) el.style.fontSize = (base * size / 100).toFixed(2) + 'px';
+                    if (hasWeight) el.style.fontWeight = String(weight);
+                    if (dy || dx) {
+                        const pos = getComputedStyle(el).position;
+                        if (pos === 'static') {
+                            /* static 元素用 relative + top/left 位移，不干扰原有布局流 */
+                            el.style.position = 'relative';
+                            el.style.top = dy + 'px';
+                            el.style.left = dx + 'px';
+                        } else {
+                            /* 已定位元素改用独立 translate，避免覆盖自身 top/left */
+                            el.style.translate = dx + 'px ' + dy + 'px';
+                        }
+                    }
+                    el.dataset.mcwTs = '1';
+                } catch (e) {}
+            });
+        };
+
         const createWidgetEl = (def) => {
             const wrap = document.createElement('div');
             wrap.className = 'home-widget';
@@ -36654,6 +36739,8 @@ if (_cancelEnvEl) _cancelEnvEl.addEventListener('click', () => {
                     const err = runWidgetScripts(wrap, def, root, holder, parts.scripts);
                     if (err) { errBox.querySelector('.hwe-sub').textContent = err.slice(0, 40); errBox.style.display = 'flex'; }
                     else errBox.style.display = 'none';
+                    /* 脚本可能刚生成文字节点，等它跑完再套用文字样式 */
+                    try { applyWidgetTextStyle(holder, bgd); } catch (e) {}
                 };
                 const ext = (parts.scripts || []).filter(s => s && s.src).map(s => s.src);
                 if (ext.length) loadWidgetExtScripts(ext).then(run); else run();
@@ -36684,6 +36771,8 @@ if (_cancelEnvEl) _cancelEnvEl.addEventListener('click', () => {
                    把空间让给主体（不用裁切也能看得清） */
                 const sz = (s >= 0.95) ? 'lg' : (s >= 0.7 ? 'md' : (s >= 0.52 ? 'sm' : 'xs'));
                 if (holder.dataset.sz !== sz) holder.dataset.sz = sz;
+                /* 补一次文字样式：部分组件在定时器里才生成文字（幂等，不会重复放大） */
+                try { applyWidgetTextStyle(holder, (def.data && typeof def.data === 'object') ? def.data : null); } catch (e) {}
             };
             wrap._fit = fitWidget;
             const _prevBuild = build;
@@ -37122,6 +37211,20 @@ if (_cancelEnvEl) _cancelEnvEl.addEventListener('click', () => {
                 { key: '__c2', label: '次要文字 / 说明', type: 'color' },
                 { key: '__c3', label: '强调色（数字、高亮、图标）', type: 'color' }
             ];
+            /* 通用文字样式：放大 / 加粗 / 挪位置，对任何小组件都生效 */
+            const textFields = [
+                { key: '__tsScope', label: '作用于', type: 'select', options: [
+                    ['main', '主文字（字号最大的）'],
+                    ['all', '全部文字'],
+                    ['bottom', '底部文字（最靠下的）']
+                ] },
+                { key: '__tsSize', label: '文字大小', type: 'range', min: 60, max: 240, step: 10, suffix: '%', value: 100 },
+                { key: '__tsWeight', label: '文字粗细', type: 'select', options: [
+                    ['', '保持默认'], ['400', '常规'], ['600', '中等'], ['700', '加粗'], ['800', '很粗'], ['900', '特粗']
+                ] },
+                { key: '__tsDy', label: '上下位置（＋往下）', type: 'range', min: -40, max: 60, step: 2, suffix: 'px', value: 0 },
+                { key: '__tsDx', label: '左右位置（＋往右）', type: 'range', min: -40, max: 40, step: 2, suffix: 'px', value: 0 }
+            ];
             const addSep = (txt) => {
                 const hr = document.createElement('div');
                 hr.className = 'wedit-sep';
@@ -37155,6 +37258,14 @@ if (_cancelEnvEl) _cancelEnvEl.addEventListener('click', () => {
             }
             addSep('整体色调');
             themeFields.forEach(f => body.appendChild(mkField(f)));
+            addSep('文字样式（放大 / 加粗 / 挪位置）');
+            textFields.forEach(f => body.appendChild(mkField(f)));
+            (function () {
+                const h = document.createElement('div');
+                h.className = 'wedit-hint';
+                h.textContent = '默认作用于「主文字」（组件里字号最大的那行，如转盘的结果文字）。位置被容器裁到的话，把小组件调大一点即可。';
+                body.appendChild(h);
+            })();
             if (!hasOwnImage) {
                 addSep('背景');
                 bgFields.forEach(f => body.appendChild(mkField(f)));
@@ -37170,7 +37281,10 @@ if (_cancelEnvEl) _cancelEnvEl.addEventListener('click', () => {
                     bgFields.forEach(f => { if (out[f.key] === undefined && f.value !== undefined) out[f.key] = f.value; });
                 }
                 /* 字段定义要把背景组也算进去，否则背景滑块的值不会被转成数字 */
-                const allFields = (cfg && cfg.fields ? cfg.fields : []).concat(hasOwnImage ? [] : bgFields);
+                const allFields = (cfg && cfg.fields ? cfg.fields : [])
+                    .concat(hasOwnImage ? [] : bgFields)
+                    .concat(textFields);
+                textFields.forEach(f => { if (out[f.key] === undefined && f.value !== undefined) out[f.key] = f.value; });
                 body.querySelectorAll('[data-key]').forEach(inp => {
                     const k = inp.dataset.key;
                     const f = allFields.filter(x => x.key === k)[0];
@@ -38188,7 +38302,8 @@ if (_cancelEnvEl) _cancelEnvEl.addEventListener('click', () => {
                     '.mr-wheel span{position:absolute;left:50%;top:50%;transform-origin:0 0;font-size:13px;color:#fff;font-weight:600;white-space:nowrap;}',
                     '.mr-pin{position:absolute;left:50%;top:-3px;transform:translateX(-50%);width:0;height:0;',
                     '  border-left:6px solid transparent;border-right:6px solid transparent;border-top:10px solid var(--accent-color);}',
-                    '.mr-res{font-size:14px;font-weight:600;opacity:.85;text-align:center;}',
+                    '.mr-res{font-size:17px;font-weight:800;opacity:1;text-align:center;margin-top:6px;line-height:1.25;',
+                    '  text-shadow:0 1px 2px rgba(0,0,0,.10);}',
                     '</style>',
                     '<script>',
                     '(function(){',
@@ -38744,8 +38859,9 @@ if (_cancelEnvEl) _cancelEnvEl.addEventListener('click', () => {
                     '  background:var(--accent-color);color:#fff;font-size:13px;font-weight:800;letter-spacing:.5px;',
                     '  box-shadow:0 2px 8px rgba(0,0,0,.3);transition:transform .14s;}',
                     '.mr-go:active{transform:translate(-50%,-50%) scale(.9);}',
-                    '.mr-res{font-size:14px;font-weight:700;opacity:.9;text-align:center;max-width:100%;',
-                    '  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}',
+                    '.mr-res{font-size:17px;font-weight:800;opacity:1;text-align:center;max-width:100%;margin-top:6px;line-height:1.25;',
+                    '  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;',
+                    '  text-shadow:0 1px 2px rgba(0,0,0,.10);}',
                     '.mr-res.win{color:var(--accent-color);animation:mrPop .45s cubic-bezier(.34,1.5,.5,1);}',
                     '@keyframes mrPop{0%{transform:scale(.7);opacity:0}60%{transform:scale(1.12)}100%{transform:scale(1);opacity:1}}',
                     '</style>',
