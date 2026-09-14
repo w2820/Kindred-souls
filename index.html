@@ -15906,6 +15906,31 @@ html[data-theme="dark"] .inv-card {
             </div>
             <button type="button" class="fq-time-reset" id="fq-t-reset">恢复为聊天设置的回复速度</button>
         </div>
+        <div class="fq-time-card" style="margin-top:10px;">
+            <div class="fq-time-head"><i class="fas fa-dice" style="color:var(--accent-color);"></i><span>对方选择概率</span></div>
+            <div class="fq-time-tip">设置 TA 选「接受 / 中立 / 拒绝」的概率。三项会按占比自动归一（合计不必正好 100）。</div>
+            <div class="fq-time-row">
+                <span class="fq-time-lab">接受</span>
+                <input type="number" class="fq-time-inp" id="fq-p-acc" min="0" max="100" step="1" value="25">
+                <span class="fq-time-unit">%</span>
+            </div>
+            <div class="fq-time-row">
+                <span class="fq-time-lab">中立</span>
+                <input type="number" class="fq-time-inp" id="fq-p-neu" min="0" max="100" step="1" value="25">
+                <span class="fq-time-unit">%</span>
+            </div>
+            <div class="fq-time-row">
+                <span class="fq-time-lab">拒绝</span>
+                <input type="number" class="fq-time-inp" id="fq-p-rej" min="0" max="100" step="1" value="25">
+                <span class="fq-time-unit">%</span>
+            </div>
+            <div class="fq-time-tip" id="fq-p-tip" style="margin-top:8px;"></div>
+            <label class="fq-time-row" style="cursor:pointer;margin-top:4px;">
+                <span class="fq-time-lab" style="flex:1;">越往后越容易拒绝</span>
+                <input type="checkbox" id="fq-p-ramp" style="width:16px;height:16px;accent-color:var(--accent-color);">
+            </label>
+            <button type="button" class="fq-time-reset" id="fq-p-even">三项均分（33 / 33 / 34）</button>
+        </div>
         <div style="display:flex;flex-direction:column;gap:10px;padding-bottom:6px;">
             <button class="modal-btn modal-btn-primary" id="fq-main-add" style="width:100%;"><i class="fas fa-plus"></i> 新增问卷</button>
             <button class="modal-btn modal-btn-secondary" id="fq-main-history" style="width:100%;"><i class="fas fa-clock-rotate-left"></i> 已答历史问卷</button>
@@ -15922,6 +15947,7 @@ html[data-theme="dark"] .inv-card {
             <i class="fas fa-folder-plus"></i><span>选择玩法</span>
         </div>
         <div id="fq-lib-list" style="flex:1;overflow-y:auto;padding:4px 2px 10px;display:flex;flex-direction:column;gap:10px;"></div>
+        <button class="modal-btn modal-btn-primary" id="fq-lib-new" style="width:100%;flex-shrink:0;margin-bottom:8px;"><i class="fas fa-plus"></i> 新建空白问卷</button>
         <div class="modal-buttons" style="flex-shrink:0;">
             <button class="modal-btn modal-btn-secondary" id="fq-lib-restore" style="display:none;">恢复默认玩法</button>
             <button class="modal-btn modal-btn-secondary" id="fq-lib-close">返回</button>
@@ -15961,6 +15987,7 @@ html[data-theme="dark"] .inv-card {
         <input type="text" id="fq-edit-name" style="width:100%;padding:10px 12px;border:1px solid var(--border-color);border-radius:10px;background:var(--secondary-bg);color:var(--text-primary);font-size:13px;font-family:inherit;outline:none;">
         <div style="font-size:12px;color:var(--text-secondary);margin:14px 0 8px;">题目（一行一题，题号会自动生成）</div>
         <textarea id="fq-edit-qs" style="flex:1;min-height:220px;padding:10px 12px;border:1px solid var(--border-color);border-radius:10px;background:var(--secondary-bg);color:var(--text-primary);font-size:13px;line-height:1.9;font-family:inherit;outline:none;resize:vertical;"></textarea>
+        <div id="fq-edit-hint" style="font-size:11px;color:var(--text-secondary);line-height:1.6;margin:8px 0 2px;">一行一道题目，回车换行。写好后点保存即可。</div>
         <div class="modal-buttons" style="flex-shrink:0;">
             <button class="modal-btn modal-btn-secondary" id="fq-edit-cancel">取消</button>
             <button class="modal-btn modal-btn-primary" id="fq-edit-save">保存</button>
@@ -55533,6 +55560,7 @@ window.BUILTIN_DICT_LIBRARY = {"version":"1.0","cats":[{"id":"quote","name":"语
 (function () {
     var AP = (typeof APP_PREFIX === 'string' && APP_PREFIX) ? APP_PREFIX : 'CHAT_APP_V3_';
     var K_LIB = AP + 'funQuizLib', K_HIST = AP + 'funQuizHist', K_TIME = AP + 'funQuizTiming';
+    var K_PROB = AP + 'funQuizProb', K_DEL = AP + 'funQuizDelBuiltin';
 
     /* ---------- 内置玩法：15 题（来源：网络热门情侣答题玩法） ---------- */
     var BUILTIN_QS = [
@@ -55560,16 +55588,127 @@ window.BUILTIN_DICT_LIBRARY = {"version":"1.0","cats":[{"id":"quote","name":"语
         builtin: true
     };
 
+    /* 内置玩法二：社交网络版容忍度 */
+    var BUILTIN_2 = {
+        id: 'fq_builtin_social',
+        title: '异性互动容忍度 · 社交网络版',
+        desc: '朋友圈点赞、收藏动态、深夜连麦……从线上到线下共 12 级，测测你们对「社交软件上的异性互动」到底能忍到哪一级。',
+        questions: [
+            '朋友圈每条动态都互相点赞评论',
+            '收藏 / 保存对方的照片和动态',
+            '社交软件上频繁互动、互相 @',
+            '记得对方生日，并互送礼物',
+            '买了同款、情侣款的东西一起用',
+            '互相发自拍，分享日常照片',
+            '频繁私聊，从早聊到晚',
+            '单独约出去喝奶茶、吃饭',
+            '深夜连麦打游戏到凌晨',
+            '有只属于两个人的昵称和暗号',
+            '吵架了先找对方倾诉，而不是我',
+            '一起跨年、一起过夜'
+        ],
+        builtin: true
+    };
+
+    /* 内置玩法三：情侣坦白局 */
+    var BUILTIN_3 = {
+        id: 'fq_builtin_confess',
+        title: '情侣坦白局 · 灵魂拷问',
+        desc: '网上超火的「情侣坦白局」精简版，15 道越问越走心的题。接受 = 愿意回答 / 认同，中立 = 看情况，拒绝 = 不想答或不同意。',
+        questions: [
+            '和前任是怎么认识的，现在还有联系吗',
+            '第一次见我时，你真实的第一印象是什么',
+            '手机里有没有我不能看的东西',
+            '我哪个瞬间让你觉得「就是这个人了」',
+            '学生时代暗恋过谁，做过最勇敢的事是什么',
+            '如果有异性主动追你，你会怎么处理',
+            '你私下是怎么向朋友描述我的',
+            '吵架时我说过的哪句话最伤你',
+            '你藏过最不敢对我说的话是什么',
+            '你觉得我们之间最大的问题是什么',
+            '想象过我们的婚礼吗，希望有几个孩子',
+            '我哪种模样最让你招架不住',
+            '如果我一辈子没什么大出息，你会失望吗',
+            '你更爱我的脸还是身材',
+            '你有陪我走完这一生的决心吗'
+        ],
+        builtin: true
+    };
+
+    /* 内置玩法四：快问快答二选一 */
+    var BUILTIN_4 = {
+        id: 'fq_builtin_either',
+        title: '快问快答 · 二选一',
+        desc: '15 道二选一的灵魂快问。接受 = 选前者，拒绝 = 选后者，中立 = 都行 / 看情况。看看你们到底有多像。',
+        questions: [
+            '一见钟情 还是 日久生情',
+            '被夸外貌 还是 被夸性格',
+            '遇事凭直觉 还是 讲逻辑',
+            '好看更重要 还是 有趣更重要',
+            '出去玩随心而行 还是 提前计划',
+            '喜欢黏一点 还是 理智一点',
+            '前任的礼物留着 还是 扔掉',
+            '主动去追 还是 想被追',
+            '选择爱我的 还是 我爱的',
+            '喜欢拥抱 还是 喜欢亲吻',
+            '送花 还是 送小蛋糕',
+            '写一封情书 还是 唱一首情歌',
+            '物质支持更重要 还是 情绪价值更重要',
+            '吵架主动给台阶 还是 等对方先低头',
+            '喜欢更重要 还是 合适更重要'
+        ],
+        builtin: true
+    };
+
+    /* 内置玩法五：关于未来的 15 问 */
+    var BUILTIN_5 = {
+        id: 'fq_builtin_future',
+        title: '关于未来的 15 问',
+        desc: '很多感情不是败给不爱，而是败给「没聊过」。这 15 题关于定居、婚礼、底线与家人，建议找个晚上认真聊一遍。',
+        questions: [
+            '想在哪个城市定居',
+            '能接受异地恋多久',
+            '怎么看待彩礼和嫁妆',
+            '打算什么时候结婚',
+            '想要什么样的婚礼，蜜月想去哪',
+            '婚后能接受和父母同住吗',
+            '我和你家人闹矛盾，你站哪边',
+            '想要孩子吗，想要几个',
+            '你认为忠诚的定义是什么',
+            '你最不能接受我做的一件事',
+            '有异性发暧昧消息，你会怎么处理',
+            '你的原则和底线是什么',
+            '我惹你生气时，希望我怎么哄你',
+            '事业和感情冲突时，你怎么选',
+            '你理想的生活状态是什么样的'
+        ],
+        builtin: true
+    };
+
+    var BUILTIN_ALL = [BUILTIN, BUILTIN_2, BUILTIN_3, BUILTIN_4, BUILTIN_5];
+
     /* ---------- 存储 ---------- */
     function rd(k, def) { try { var v = localStorage.getItem(k); return v ? JSON.parse(v) : def; } catch (e) { return def; } }
     function wr(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} }
     function lf(k, v) { try { if (typeof localforage !== 'undefined' && localforage) localforage.setItem(k, v); } catch (e) {} }
 
     var _lib = null, _hist = null;
+    function getDel() { var d = rd(K_DEL, []); return Array.isArray(d) ? d : []; }
+    function markDel(id) { try { var d = getDel(); if (d.indexOf(id) < 0) { d.push(id); wr(K_DEL, d); lf(K_DEL, d); } } catch (e) {} }
     function getLib() {
         if (_lib) return _lib;
         _lib = rd(K_LIB, null);
-        if (!Array.isArray(_lib) || !_lib.length) _lib = [JSON.parse(JSON.stringify(BUILTIN))];
+        if (!Array.isArray(_lib) || !_lib.length) {
+            _lib = JSON.parse(JSON.stringify(BUILTIN_ALL));
+        } else {
+            /* 老存档：把新增的内置玩法补进去（用户手动删过的不补） */
+            var del = getDel();
+            var has = {};
+            _lib.forEach(function (q) { if (q && q.id) has[q.id] = 1; });
+            BUILTIN_ALL.forEach(function (b) {
+                if (!has[b.id] && del.indexOf(b.id) < 0) _lib.push(JSON.parse(JSON.stringify(b)));
+            });
+        }
         return _lib;
     }
     function saveLib() { wr(K_LIB, _lib); lf(K_LIB, _lib); }
@@ -55598,6 +55737,28 @@ window.BUILTIN_DICT_LIBRARY = {"version":"1.0","cats":[{"id":"quote","name":"语
         return _time;
     }
     function saveTime() { wr(K_TIME, _time); lf(K_TIME, _time); }
+
+    /* ---------- 对方选择概率（接受 / 中立 / 拒绝） ---------- */
+    var _prob = null;
+    function getProb() {
+        if (_prob) return _prob;
+        var p = rd(K_PROB, null);
+        if (!p || typeof p !== 'object') p = { acc: 25, neu: 25, rej: 25, ramp: false };
+        p.acc = isFinite(p.acc) ? Math.max(0, Math.min(100, Number(p.acc))) : 25;
+        p.neu = isFinite(p.neu) ? Math.max(0, Math.min(100, Number(p.neu))) : 25;
+        p.rej = isFinite(p.rej) ? Math.max(0, Math.min(100, Number(p.rej))) : 25;
+        p.ramp = !!p.ramp;
+        _prob = p;
+        return _prob;
+    }
+    function saveProb() { wr(K_PROB, _prob); lf(K_PROB, _prob); }
+    /* 三项按占比归一化为真实概率（合计不足或超过 100 都按比例摊） */
+    function normProb(p) {
+        var a = Math.max(0, Number(p.acc) || 0), n = Math.max(0, Number(p.neu) || 0), r = Math.max(0, Number(p.rej) || 0);
+        var sum = a + n + r;
+        if (sum <= 0) return { acc: 1 / 3, neu: 1 / 3, rej: 1 / 3 };
+        return { acc: a / sum, neu: n / sum, rej: r / sum };
+    }
     function clampT(v, d) { v = parseInt(v, 10); if (isNaN(v) || v < 1) v = d; if (v > 600) v = 600; return v; }
     /* 在最短~最长之间随机取毫秒 */
     function spanMs(mn, mx) {
@@ -55654,14 +55815,20 @@ window.BUILTIN_DICT_LIBRARY = {"version":"1.0","cats":[{"id":"quote","name":"语
         return { list: out, hasSrc: (cards.length + emos.length) > 0 };
     }
 
-    /* ---------- 对方作答：等级越高越可能拒绝 ---------- */
+    /* ---------- 对方作答：默认按设定概率，可开启「越往后越容易拒绝」 ---------- */
     function rollAnswer(idx, total) {
-        var ratio = total > 1 ? (idx / (total - 1)) : 1;   // 0 → 1
-        var pAccept = Math.max(0.08, 0.86 - ratio * 0.78);
-        var pNeutral = Math.max(0.08, 0.34 - Math.abs(ratio - 0.5) * 0.2);
+        var p = getProb();
+        var a = Math.max(0, Number(p.acc) || 0), n = Math.max(0, Number(p.neu) || 0), r0 = Math.max(0, Number(p.rej) || 0);
+        if (p.ramp && total > 1) {
+            /* 递进：接受随题号衰减，拒绝随题号上扬，中立保持 */
+            var ratio = idx / (total - 1);
+            a = a * (1 - ratio * 0.8);
+            r0 = r0 * (1 + ratio * 1.2);
+        }
+        var np = normProb({ acc: a, neu: n, rej: r0 });
         var r = Math.random();
-        if (r < pAccept) return '接受';
-        if (r < pAccept + pNeutral) return '中立';
+        if (r < np.acc) return '接受';
+        if (r < np.acc + np.neu) return '中立';
         return '拒绝';
     }
 
@@ -55671,6 +55838,7 @@ window.BUILTIN_DICT_LIBRARY = {"version":"1.0","cats":[{"id":"quote","name":"语
         var tip = md('fq-main-tip');
         if (tip) tip.textContent = '和「' + partner() + '」一起玩点有意思的问答小游戏。选一个玩法，邀请 TA 一起作答吧～';
         renderTiming();
+        renderProb();
         openM('fq-main-modal');
     };
 
@@ -55707,6 +55875,56 @@ window.BUILTIN_DICT_LIBRARY = {"version":"1.0","cats":[{"id":"quote","name":"语
                 _time = { ansMin: a, ansMax: b, cmtMin: a, cmtMax: b };
                 saveTime(); renderTiming();
                 notify('已恢复为聊天设置的回复速度（' + a + '-' + b + ' 秒）', 'success');
+            });
+        }
+    }
+
+    /* ---------- 概率设置渲染 ---------- */
+    function renderProb() {
+        var p = getProb();
+        var set = function (id, v) { var el = md(id); if (el) el.value = String(v); };
+        set('fq-p-acc', p.acc); set('fq-p-neu', p.neu); set('fq-p-rej', p.rej);
+        var cb = md('fq-p-ramp'); if (cb) cb.checked = !!p.ramp;
+        var tip = md('fq-p-tip');
+        if (tip) {
+            var sum = (Number(p.acc) || 0) + (Number(p.neu) || 0) + (Number(p.rej) || 0);
+            var np = normProb(p);
+            var pc = function (x) { return (x * 100).toFixed(1).replace(/\.0$/, '') + '%'; };
+            tip.innerHTML = '当前设定 <b>' + (Number(p.acc) || 0) + '% / ' + (Number(p.neu) || 0) + '% / ' + (Number(p.rej) || 0) + '%</b>' +
+                (sum === 100 ? '（合计 100%）' : '（合计 ' + sum + '%）') +
+                '<br>实际生效：<b>' + pc(np.acc) + ' / ' + pc(np.neu) + ' / ' + pc(np.rej) + '</b>' +
+                (p.ramp ? '<br>已开启递进：越靠后的题目越容易拒绝。' : '');
+        }
+    }
+    function bindProb() {
+        var pairs = [['fq-p-acc', 'acc'], ['fq-p-neu', 'neu'], ['fq-p-rej', 'rej']];
+        pairs.forEach(function (pr) {
+            var el = md(pr[0]);
+            if (!el || el._fqBound) return;
+            el._fqBound = true;
+            var apply = function () {
+                var p = getProb();
+                var v = parseInt(el.value, 10);
+                if (!isFinite(v)) v = 25;
+                v = Math.max(0, Math.min(100, v));
+                el.value = String(v);
+                p[pr[1]] = v;
+                saveProb(); renderProb();
+            };
+            el.addEventListener('change', apply);
+            el.addEventListener('blur', apply);
+        });
+        var cb = md('fq-p-ramp');
+        if (cb && !cb._fqBound) {
+            cb._fqBound = true;
+            cb.addEventListener('change', function () { var p = getProb(); p.ramp = !!cb.checked; saveProb(); renderProb(); });
+        }
+        var ev = md('fq-p-even');
+        if (ev && !ev._fqBound) {
+            ev._fqBound = true;
+            ev.addEventListener('click', function () {
+                var p = getProb(); p.acc = 33; p.neu = 33; p.rej = 34;
+                saveProb(); renderProb(); notify('已设为三项均分', 'success');
             });
         }
     }
@@ -55750,13 +55968,16 @@ window.BUILTIN_DICT_LIBRARY = {"version":"1.0","cats":[{"id":"quote","name":"语
 
     /* ================= 编辑 ================= */
     var _editId = null;
-    function openEdit(id) {
+    function openEdit(id, blank) {
         var q = id ? findQ(id) : null;
         _editId = id || null;
         var ttl = md('fq-edit-title'); if (ttl) ttl.textContent = q ? '编辑问卷' : '新增问卷';
         var n = md('fq-edit-name'); if (n) n.value = q ? q.title : '新的趣味问卷';
         var t = md('fq-edit-qs');
-        if (t) t.value = q ? (q.questions || []).join('\n') : BUILTIN_QS.join('\n');
+        /* 新建空白问卷时题目留空，由用户自己一行一题填写 */
+        if (t) t.value = q ? (q.questions || []).join('\n') : (blank ? '' : BUILTIN_QS.join('\n'));
+        var hint = md('fq-edit-hint');
+        if (hint && !q) hint.textContent = blank ? '一行一道题目，回车换行。写好后点保存即可。' : '一行一道题目，可自由修改。';
         openM('fq-edit-modal');
     }
     function saveEdit() {
@@ -56106,11 +56327,18 @@ window.BUILTIN_DICT_LIBRARY = {"version":"1.0","cats":[{"id":"quote","name":"语
         if (g('fq-main-history')) g('fq-main-history').addEventListener('click', function () { renderHistory(); openM('fq-history-modal'); });
         if (g('fq-main-close')) g('fq-main-close').addEventListener('click', function () { closeM('fq-main-modal'); });
         if (g('fq-lib-close')) g('fq-lib-close').addEventListener('click', function () { closeM('fq-lib-modal'); });
+        if (g('fq-lib-new')) g('fq-lib-new').addEventListener('click', function () { openEdit(null, true); });
         if (g('fq-lib-restore')) g('fq-lib-restore').addEventListener('click', function () {
+            var del = getDel();
             var lib = getLib();
-            lib.unshift(JSON.parse(JSON.stringify(BUILTIN)));
+            BUILTIN_ALL.forEach(function (b) {
+                if (del.indexOf(b.id) < 0 && !lib.some(function (x) { return x.id === b.id; })) {
+                    lib.unshift(JSON.parse(JSON.stringify(b)));
+                }
+            });
             saveLib(); renderLib(); notify('已恢复默认玩法', 'success');
         });
+        bindProb();
 
         if (g('fq-detail-invite')) g('fq-detail-invite').addEventListener('click', function () {
             var q = findQ(_curQid); if (q) sendInvite(q);
@@ -56119,6 +56347,7 @@ window.BUILTIN_DICT_LIBRARY = {"version":"1.0","cats":[{"id":"quote","name":"语
         if (g('fq-detail-del')) g('fq-detail-del').addEventListener('click', function () {
             var q = findQ(_curQid); if (!q) return;
             if (!window.confirm('确定删除问卷「' + q.title + '」吗？')) return;
+            if (q.builtin) markDel(q.id);
             _lib = getLib().filter(function (x) { return x.id !== q.id; });
             saveLib();
             closeM('fq-detail-modal'); renderLib();
@@ -56162,6 +56391,7 @@ window.BUILTIN_DICT_LIBRARY = {"version":"1.0","cats":[{"id":"quote","name":"语
         '.fq-time-inp{width:62px;padding:6px 4px;text-align:center;border:1px solid var(--border-color);border-radius:9px;background:var(--primary-bg);color:var(--text-primary);font-size:12.5px;font-family:inherit;outline:none;-moz-appearance:textfield;}',
         '.fq-time-inp::-webkit-outer-spin-button,.fq-time-inp::-webkit-inner-spin-button{-webkit-appearance:none;margin:0;}',
         '.fq-time-unit{font-size:11px;color:var(--text-secondary);}',
+        '.fq-time-lab{font-size:12px;color:var(--text-primary);width:30px;flex-shrink:0;}',
         '.fq-time-reset{margin-top:10px;width:100%;padding:7px 0;border:1px solid var(--border-color);border-radius:10px;background:var(--primary-bg);color:var(--text-secondary);font-size:11.5px;cursor:pointer;font-family:inherit;}',
         /* 聊天卡片 */
         '.fq-card{width:230px;border-radius:16px;overflow:hidden;background:var(--primary-bg);border:1px solid var(--border-color);box-shadow:0 4px 16px rgba(0,0,0,.08);}',
