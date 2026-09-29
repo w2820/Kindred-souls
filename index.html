@@ -14902,7 +14902,7 @@ html[data-color-theme="amber-night"] .message-received{
                 <button class="collapsed-extra-btn" title="字卡回复" onclick="(function(){window.toggleCollapsedExtras(true);showModal(document.getElementById('custom-replies-modal'));})();">
                     <i class="fas fa-comment-dots"></i><span>字卡</span>
                 </button>
-                <button class="collapsed-extra-btn" title="塔罗占卜" onclick="(function(){window.toggleCollapsedExtras(true);generateFortune();})();">
+                <button class="collapsed-extra-btn" title="占卜" onclick="(function(){if(window._mcOpenFortune)window._mcOpenFortune();else{window.toggleCollapsedExtras(true);generateFortune();switchFLTab('fortune');showModal(document.getElementById('fortune-lenormand-modal'));}})();">
                     <i class="fas fa-star-and-crescent"></i><span>占卜</span>
                 </button>
                 <button class="collapsed-extra-btn" id="collapsed-call-btn" title="视频通话" onclick="(function(){window.toggleCollapsedExtras(true);if(window.callFeature&&typeof window.callFeature.startCall==='function')window.callFeature.startCall(false);})();">
@@ -26978,6 +26978,14 @@ window.openPersonalInfoApp = function() {
     avatarPreview.style.fontSize = '34px';
 
     const pickAvatar = () => {
+        if (typeof window._pickAvatarWithCrop === 'function') {
+            window._pickAvatarWithCrop(function (d) {
+                if (!d) return;
+                newAvatarData = d;
+                renderPreview();
+            }, { maxDim: 256, maxBytes: (window.MAX_AVATAR_SIZE || 2 * 1024 * 1024) });
+            return;
+        }
         if (typeof window._makeAvatarDataURL === 'function') {
             const input = document.createElement('input');
             input.type = 'file';
@@ -28281,6 +28289,14 @@ window.previewGroupMemberAvatar = function(input) {
         _groupMemberAvatarDataUrl = dataUrl;
         if (preview) preview.innerHTML = '<img src="' + dataUrl + '" style="width:100%;height:100%;object-fit:cover;border-radius:50%;">';
     };
+    if (typeof window._pickAvatarWithCrop === 'function') {
+        window._pickAvatarWithCrop(function (dataUrl) {
+            if (!dataUrl) return;
+            applyAvatar(dataUrl);
+            if (input) input.value = '';
+        }, { maxDim: 256, maxBytes: (window.MAX_AVATAR_SIZE || 2 * 1024 * 1024) });
+        return;
+    }
     if (typeof window._makeAvatarDataURL === 'function') {
         showNotification('正在处理头像...', 'info', 1000);
         window._makeAvatarDataURL(file, { maxDim: 240, maxBytes: MAX_AVATAR_SIZE }).then(function(dataUrl) {
@@ -30661,7 +30677,67 @@ function switchFLTab(tab) {
     const activePanel = document.getElementById('fl-panel-' + tab);
     if (activeTab) activeTab.classList.add('active');
     if (activePanel) activePanel.classList.add('fl-panel-active');
+    try { localStorage.setItem('CHAT_APP_V3_flLastTab', tab); } catch (e) {}
+    if (tab === 'divihistory' && typeof renderDiviHistory === 'function') { try { renderDiviHistory(); } catch (e) {} }
 }
+
+/* 统一的占卜页入口：从聊天加号面板 / 桌面图标等处打开 */
+function openFortuneModal(tab) {
+    var KNOWN = ['fortune', 'lenormand', 'tarot', 'dream', 'divihistory'];
+    var t = tab;
+    if (!t || KNOWN.indexOf(t) < 0) {
+        try { t = localStorage.getItem('CHAT_APP_V3_flLastTab') || 'fortune'; } catch (e) { t = 'fortune'; }
+        if (KNOWN.indexOf(t) < 0) t = 'fortune';
+    }
+    try { if (typeof window.toggleCollapsedExtras === 'function') window.toggleCollapsedExtras(true); } catch (e) {}
+    try { if (typeof generateFortune === 'function') generateFortune(); } catch (e) {}
+    try { switchFLTab(t); } catch (e) {}
+    var m = document.getElementById('fortune-lenormand-modal');
+    if (!m) return false;
+    if (typeof showModal === 'function') showModal(m);
+    else { m.style.display = 'flex'; m.classList.add('active'); }
+    return true;
+}
+window._mcOpenFortune = openFortuneModal;
+
+/* 占卜页：点弹窗空白处（遮罩）即可关闭 —— 只在点在遮罩本身时触发，点内容区不关 */
+(function () {
+    var FM_ID = 'fortune-lenormand-modal';
+    function bind() {
+        var m = document.getElementById(FM_ID);
+        if (!m || m._mcBackdropBound) return;
+        m._mcBackdropBound = true;
+        m.addEventListener('click', function (e) {
+            if (e.target !== m) return;                 // 点在内容/按钮上不处理
+            if (m.style.display === 'none') return;
+            /* 若此刻有更上层的弹窗开着（如牌义详情），先关最上面那个 */
+            try {
+                var all = document.querySelectorAll('.modal');
+                for (var i = all.length - 1; i >= 0; i--) {
+                    var x = all[i];
+                    if (x === m) break;
+                    if (x.style.display && x.style.display !== 'none' && getComputedStyle(x).display !== 'none') {
+                        if (typeof hideModal === 'function') hideModal(x);
+                        return;
+                    }
+                }
+            } catch (err) {}
+            if (typeof hideModal === 'function') hideModal(m);
+            else { m.style.display = 'none'; }
+        });
+    }
+    if (document.getElementById(FM_ID)) bind();
+    else document.addEventListener('DOMContentLoaded', bind);
+    setTimeout(bind, 0);
+    /* ESC 也关 */
+    document.addEventListener('keydown', function (e) {
+        if (e.key !== 'Escape') return;
+        var m = document.getElementById(FM_ID);
+        if (!m || m.style.display === 'none') return;
+        if (typeof hideModal === 'function') hideModal(m);
+        else m.style.display = 'none';
+    });
+})();
 
 
 function resetLenormand() {
@@ -41940,9 +42016,8 @@ if (_cancelEnvEl) _cancelEnvEl.addEventListener('click', () => {
             } else if (appId === 'wallet') {
                 if (typeof window.openWalletApp === 'function') window.openWalletApp();
             } else if (appId === 'fortune') {
-                generateFortune();
-                switchFLTab('fortune');
-                showModal(document.getElementById('fortune-lenormand-modal'));
+                if (typeof openFortuneModal === 'function') openFortuneModal('fortune');
+                else { generateFortune(); switchFLTab('fortune'); showModal(document.getElementById('fortune-lenormand-modal')); }
             } else if (appId === 'replies') {
                 openReplyLibrary();
             } else if (appId === 'statuses') {
@@ -42117,6 +42192,14 @@ if (_cancelEnvEl) _cancelEnvEl.addEventListener('click', () => {
             const input = document.createElement('input');
             input.type = 'file';
             input.accept = 'image/*';
+            input.remove();
+            if (window._pickAvatarWithCrop) {
+                window._pickAvatarWithCrop(async (base64Data) => {
+                    if (!base64Data) return;
+                    await applyAvatarData(base64Data);
+                }, { maxDim: 256, maxBytes: MAX_AVATAR_SIZE });
+                return;
+            }
             input.onchange = async (e) => {
                 const file = e.target.files[0];
                 if (!file) return;
@@ -42124,6 +42207,15 @@ if (_cancelEnvEl) _cancelEnvEl.addEventListener('click', () => {
                 try {
                     const base64Data = await window._makeAvatarDataURL(file, { maxDim: 300, maxBytes: MAX_AVATAR_SIZE });
                     if (!base64Data) return;
+                    await applyAvatarData(base64Data);
+                } catch (err) {
+                    console.error(err); showNotification('图片处理失败', 'error');
+                }
+            };
+            input.click();
+            return;
+            async function applyAvatarData(base64Data) {
+                try {
                     const sKey = `${APP_PREFIX}${sessionId}_`;
                     await localforage.setItem(sKey + 'partnerAvatar', base64Data);
                     const targetSess = sessionList.find(s => String(s.id) === String(sessionId));
@@ -42148,8 +42240,7 @@ if (_cancelEnvEl) _cancelEnvEl.addEventListener('click', () => {
                     console.error(err);
                     showNotification('图片处理失败', 'error');
                 }
-            };
-            input.click();
+            }
         }
         window.uploadAvatarForSession = uploadAvatarForSession;
 
@@ -42161,13 +42252,9 @@ if (_cancelEnvEl) _cancelEnvEl.addEventListener('click', () => {
             const input = document.createElement('input');
             input.type = 'file';
             input.accept = 'image/*';
-            input.onchange = async (e) => {
-                const file = e.target.files[0];
-                if (!file) return;
-                showNotification('正在处理头像...', 'info', 1000);
+            input.remove();
+            const applyMemberAvatar = async (base64Data) => {
                 try {
-                    const base64Data = await window._makeAvatarDataURL(file, { maxDim: 300, maxBytes: MAX_AVATAR_SIZE });
-                    if (!base64Data) return;
                     await localforage.setItem(`${APP_PREFIX}${idStr}_partnerAvatar`, base64Data);
                     await localforage.setItem(`gca_${idStr}`, base64Data).catch(() => {});
                     let gcsDirty = false;
@@ -42200,7 +42287,23 @@ if (_cancelEnvEl) _cancelEnvEl.addEventListener('click', () => {
                     showNotification('图片处理失败', 'error');
                 }
             };
-            input.click();
+            if (window._pickAvatarWithCrop) {
+                window._pickAvatarWithCrop(function (d) { if (d) applyMemberAvatar(d); }, { maxDim: 256, maxBytes: MAX_AVATAR_SIZE });
+                return;
+            }
+            const inp2 = document.createElement('input');
+            inp2.type = 'file'; inp2.accept = 'image/*';
+            inp2.onchange = async (e) => {
+                const file = e.target.files[0];
+                if (!file) return;
+                showNotification('正在处理头像...', 'info', 1000);
+                try {
+                    const base64Data = await window._makeAvatarDataURL(file, { maxDim: 300, maxBytes: MAX_AVATAR_SIZE });
+                    if (!base64Data) return;
+                    await applyMemberAvatar(base64Data);
+                } catch (err) { console.error(err); showNotification('图片处理失败', 'error'); }
+            };
+            inp2.click();
         }
         window.uploadMemberAvatar = uploadMemberAvatar;
 
@@ -50050,6 +50153,12 @@ document.addEventListener('DOMContentLoaded', () => {
         css += '.ex-note{font-size:10.5px;color:#9d94c9;line-height:1.6;margin:2px 2px 8px;}';
         css += '.ex-sec{font-size:11px;font-weight:800;color:#8fe6d0;letter-spacing:1px;margin:14px 2px 8px;display:flex;align-items:center;gap:6px;}';
         css += '.ex-sec:before{content:"";width:3px;height:12px;border-radius:2px;background:linear-gradient(180deg,#6a54c8,#46d0b0);}';
+        css += '.ex-arb-hot{border-color:rgba(143,230,208,.45)!important;box-shadow:0 0 0 1px rgba(143,230,208,.18) inset;}';
+        css += '.ex-arb-bad{opacity:.55;}';
+        css += '.ex-arb-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;}';
+        css += '.ex-arb-cell{display:flex;flex-direction:column;align-items:center;gap:2px;border:1px solid #332b58;background:#18132e;border-radius:10px;padding:7px 4px;font-size:11px;}';
+        css += '.ex-arb-cell i{font-size:15px;color:var(--accent-color);}';
+        css += 'html:not([data-theme="dark"]) .ex-arb-cell{background:rgba(255,255,255,.6);border-color:rgba(140,120,220,.24);}';
         css += '.ex-row{display:flex;align-items:center;gap:10px;border:1px solid #332b58;background:#18132e;border-radius:14px;padding:9px 10px;margin-bottom:8px;}';
         css += '.ex-ri{width:36px;height:36px;border-radius:11px;background:linear-gradient(160deg,#3a2f6e,#241d46);display:flex;align-items:center;justify-content:center;color:#8fe6d0;font-size:16px;flex-shrink:0;}';
         css += '.ex-rm{flex:1;min-width:0;}';
@@ -55258,28 +55367,89 @@ document.addEventListener('DOMContentLoaded', () => {
         _svT: null
     };
 
+    /* 某商品在某世界的「基准价」。
+       关键：本地价必须随该世界汇率等比缩放，否则同一件货在不同世界折算成时空币会差出几百倍，
+       产生纯粹由汇率造成的虚假套利。这样处理后，货的时空币价值只由稀缺倍数决定。 */
+    var TS_REF_RATE = 25;   /* 各世界 baseRate 的几何均值，用作归一基准 */
+    function _tsBase(w, c) {
+        var mult = (w.catMult && w.catMult[c.cat]) || 1;
+        var r = (w.baseRate || 1);
+        return Math.max(1, Math.round(c.base * mult * (r / TS_REF_RATE) * 100) / 100);
+    }
+    /* 初始化：只补缺失值，不覆盖已有价格（保证存档连续） */
     function _tsFill(st) {
         TS_WORLDS.forEach(function (w) {
-            st.rates[w.key] = Math.round(w.baseRate * (0.9 + _tsNoise('rate', w.key, st.day)) * 100) / 100;
+            if (st.rates[w.key] == null) st.rates[w.key] = Math.max(0.5, Math.round(w.baseRate * (0.97 + _tsNoise('rate', w.key, st.day) * 0.06) * 100) / 100);
             st.prices[w.key] = st.prices[w.key] || {};
+            st.hist[w.key] = st.hist[w.key] || {};
             TS_COMMODITIES.forEach(function (c) {
-                var mult = (w.catMult && w.catMult[c.cat]) || 1;
-                st.prices[w.key][c.key] = Math.max(1, Math.round(c.base * mult * (0.8 + _tsNoise('price', w.key + ':' + c.key, st.day)) * 100) / 100);
+                if (st.prices[w.key][c.key] == null) {
+                    var b0 = _tsBase(w, c);
+                    st.prices[w.key][c.key] = Math.max(1, Math.round(b0 * (0.85 + _tsNoise('p0', w.key + ':' + c.key, st.day) * 0.3) * 100) / 100);
+                }
+                if (!st.hist[w.key][c.key] || !st.hist[w.key][c.key].length) st.hist[w.key][c.key] = [st.prices[w.key][c.key]];
             });
         });
     }
+    /* 推进一天：均值回归 + 随机冲击。价格有惯性才有「低点／高点」可言 */
+    var TS_REVERT = 0.22, TS_SHOCK = 0.30, TS_HIST_MAX = 30;
+    function _tsStep(st) {
+        TS_WORLDS.forEach(function (w) {
+            var r0 = st.rates[w.key] || w.baseRate, rb = w.baseRate;
+            var nr = r0 + (rb - r0) * TS_REVERT + rb * (_tsNoise('rate', w.key, st.day) - 0.5) * 0.06;
+            st.rates[w.key] = Math.max(0.5, Math.round(nr * 100) / 100);
+            st.prices[w.key] = st.prices[w.key] || {};
+            st.hist[w.key] = st.hist[w.key] || {};
+            TS_COMMODITIES.forEach(function (c) {
+                var b = _tsBase(w, c);
+                var p = st.prices[w.key][c.key] || b;
+                var drift = (b - p) * TS_REVERT;
+                var shock = b * (_tsNoise('shock', w.key + ':' + c.key, st.day) - 0.5) * TS_SHOCK;
+                var np = Math.max(1, Math.round((p + drift + shock) * 100) / 100);
+                st.prices[w.key][c.key] = np;
+                var hh = st.hist[w.key][c.key] || (st.hist[w.key][c.key] = []);
+                hh.push(np);
+                if (hh.length > TS_HIST_MAX) hh.shift();
+            });
+        });
+    }
+    window.TS_WORLDS = TS_WORLDS; window.TS_COMMODITIES = TS_COMMODITIES;
+    TS.basePrice = function (worldKey, comKey) {
+        var w = TS.world(worldKey), c = TS.com(comKey);
+        return (w && c) ? _tsBase(w, c) : 1;
+    };
+    /* 价格历史（最近 N 天），供走势与「相对高低」判断 */
+    TS.history = function (worldKey, comKey) {
+        var st = TS.ensure();
+        var h = (st.hist && st.hist[worldKey] && st.hist[worldKey][comKey]) || null;
+        if (!h || !h.length) { var v = TS.price(worldKey, comKey); return [v]; }
+        return h.slice();
+    };
+    /* 相对基准的偏离度：负数＝便宜，正数＝贵 */
+    TS.deviation = function (worldKey, comKey) {
+        var b = TS.basePrice(worldKey, comKey), p = TS.price(worldKey, comKey);
+        return b > 0 ? (p - b) / b : 0;
+    };
+    /* 近 5 日走势：>0 涨，<0 跌 */
+    TS.trend = function (worldKey, comKey) {
+        var h = TS.history(worldKey, comKey);
+        if (h.length < 2) return 0;
+        var a = h[Math.max(0, h.length - 6)], b = h[h.length - 1];
+        return a > 0 ? (b - a) / a : 0;
+    };
 
     TS.ensure = function () {
         if (TS.state) return TS.state;
         var st = {
             v: 1, day: 1, lastSeen: Date.now(), chrono: 500, wallets: {}, cargo: {}, cargoCap: 30,
-            rates: {}, prices: {}, contactWorlds: {}, volume: {}, tollBoost: {}, intel: [], orders: [], log: [],
+            pv: 2, rates: {}, prices: {}, hist: {}, contactWorlds: {}, volume: {}, tollBoost: {}, intel: [], orders: [], log: [],
             letters: [], timeline: {}, titles: {}, tone: {},
             groups: [], groupMsgs: {}, groupEvents: [], affinity: {}, specialties: [],
             lexOn: true, lexAdd: [], lexOff: {}, ex2: {}
         };
         TS_WORLDS.forEach(function (w) { st.wallets[w.key] = 0; st.volume[w.key] = { day: 1, amount: 0 }; st.tollBoost[w.key] = 0; });
         TS_COMMODITIES.forEach(function (c) { st.cargo[c.key] = 0; });
+        if (st.pv !== 2) { st.pv = 2; st.prices = {}; st.hist = {}; st.rates = {}; }
         _tsFill(st);
         TS.state = st;
         return st;
@@ -55326,6 +55496,73 @@ document.addEventListener('DOMContentLoaded', () => {
         return out;
     };
 
+    /* ============ 跨世界套利：把「换汇→买→运→卖→换回」的全部成本算清楚 ============
+       1 时空币 → rate×(1-点差) 本币 ；本币 → ÷rate×(1-点差) 时空币 ；卖出再扣关税。
+       返回 null 表示路线无效。 */
+    var TS_FREIGHT = 0.3;   /* 跨界运费率：按货在目的地的时空币价值计，最低 1 时空币/件 */
+    TS.freightOf = function (comKey, toW, qty) {
+        var rB = TS.rate(toW);
+        if (!(rB > 0)) return 0;
+        var val = TS.price(toW, comKey) / rB;      /* 该货在目的地的时空币价值 */
+        var per = Math.max(1, Math.round(val * TS_FREIGHT * 100) / 100);
+        return { per: per, total: Math.round(per * Math.max(1, qty || 1) * 100) / 100 };
+    };
+    TS.arb = function (comKey, fromW, toW, qty) {
+        var c = TS.com(comKey);
+        if (!c || fromW === toW) return null;
+        qty = Math.max(1, Math.floor(qty || 1));
+        var rA = TS.rate(fromW), rB = TS.rate(toW);
+        if (!(rA > 0) || !(rB > 0)) return null;
+        var pA = TS.price(fromW, comKey), pB = TS.price(toW, comKey);
+        var tollB = TS.tollOf(toW);
+        var costLocal = pA * qty;                                   /* 买入花掉的本币 */
+        var needChrono = Math.ceil(costLocal / (rA * (1 - TS_SPREAD))); /* 为凑够本币要付出的时空币 */
+        var gross = pB * qty;                                       /* 卖出毛收入（B 本币） */
+        var netLocal = Math.floor(gross * (1 - tollB));             /* 关税后 */
+        var gainChrono = Math.floor(netLocal / rB * (1 - TS_SPREAD)); /* 换回时空币 */
+        var fr = TS.freightOf(comKey, toW, qty);                    /* 跨界运费 */
+        var net = gainChrono - needChrono - fr.total;
+        return {
+            com: comKey, from: fromW, to: toW, qty: qty,
+            buyPrice: pA, sellPrice: pB, toll: tollB,
+            rateA: rA, rateB: rB,
+            costLocal: costLocal, needChrono: needChrono,
+            gross: gross, netLocal: netLocal, gainChrono: gainChrono,
+            freight: fr.total, freightPer: fr.per,
+            net: net, netPer: Math.round(net / qty * 100) / 100,
+            margin: (needChrono + fr.total) > 0 ? (net / (needChrono + fr.total)) : 0
+        };
+    };
+    /* 扫描全部 商品×起点×终点 组合，按「单件净利」排序。qty 用 1 便于横向比较。 */
+    TS.arbScan = function (opts) {
+        opts = opts || {};
+        var st = TS.ensure(), out = [], i, j, k;
+        var minMargin = opts.minMargin == null ? 0 : opts.minMargin;
+        for (i = 0; i < TS_COMMODITIES.length; i++) {
+            var c = TS_COMMODITIES[i];
+            for (j = 0; j < TS_WORLDS.length; j++) {
+                for (k = 0; k < TS_WORLDS.length; k++) {
+                    if (j === k) continue;
+                    var r = TS.arb(c.key, TS_WORLDS[j].key, TS_WORLDS[k].key, opts.qty || 1);
+                    if (!r || r.net <= 0) continue;
+                    if (minMargin && r.margin < minMargin) continue;
+                    out.push(r);
+                }
+            }
+        }
+        out.sort(function (a, b) { return b.netPer - a.netPer; });
+        return opts.limit ? out.slice(0, opts.limit) : out;
+    };
+    /* 给定手上的时空币与货舱余量，算出这条路线实际能吃下多少件 */
+    TS.arbFeasible = function (r) {
+        var st = TS.ensure();
+        if (!r) return 0;
+        var capLeft = Math.max(0, (st.cargoCap || 30) - (function () { var n = 0; for (var k in st.cargo) n += (st.cargo[k] || 0); return n; })());
+        var perUnit = (r.needChrono + (r.freight || 0)) / Math.max(1, r.qty || 1);
+        var byMoney = perUnit > 0 ? Math.floor((st.chrono || 0) / perUnit) : capLeft;
+        return Math.max(0, Math.min(capLeft, byMoney));
+    };
+
     TS.log = function (text) {
         var st = TS.ensure();
         st.log.push({ day: st.day, text: String(text) });
@@ -55344,6 +55581,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (typeof d.chrono === 'number' && d.chrono >= 0) st.chrono = d.chrono;
         if (typeof d.cargoCap === 'number' && d.cargoCap >= 1) st.cargoCap = d.cargoCap;
         if (typeof d.day === 'number' && d.day >= 1) st.day = d.day;
+        if (d.pv !== 2) { st.pv = 2; st.prices = {}; st.hist = {}; st.rates = {}; }
         if (d.lastSeen) st.lastSeen = d.lastSeen;
         TS_WORLDS.forEach(function (w) {
             if (d.wallets && typeof d.wallets[w.key] === 'number') st.wallets[w.key] = Math.max(0, d.wallets[w.key]);
@@ -55414,19 +55652,20 @@ document.addEventListener('DOMContentLoaded', () => {
             st.volume[w.key] = { day: st.day, amount: 0 };
         });
         st.orders = (st.orders || []).filter(function (o) { return o.deadline == null || o.deadline >= st.day; });
-        _tsFill(st);
+        _tsFill(st); _tsStep(st);
         try { if (window.EX2 && EX2.onNewDay) EX2.onNewDay(st); } catch (e) {}
         TS.save();
         return st.day;
     };
 
     TS.intelFor = function (worldKey, comKey, day) {
-        var w = TS.world(worldKey), c = TS.com(comKey);
+        var c = TS.com(comKey);
         if (!c) return 'up';
-        var mult = (w.catMult && w.catMult[c.cat]) || 1;
-        var today = TS.price(worldKey, comKey);
-        var tomorrow = Math.max(1, Math.round(c.base * mult * (0.8 + _tsNoise('price', worldKey + ':' + comKey, (day || TS.ensure().day) + 1)) * 100) / 100);
-        return tomorrow >= today ? 'up' : 'down';
+        /* 价格现在有惯性：低于基准＝更可能回升，高于基准＝更可能回落；
+           再叠加近期走势做修正。传闻（未核实）有概率反向。 */
+        var dev = TS.deviation(worldKey, comKey), tr = TS.trend(worldKey, comKey);
+        var score = (-dev) * 1.4 + tr * 0.6;
+        return score >= 0 ? 'up' : 'down';
     };
     TS.publishIntel = function (contactId) {
         var st = TS.ensure();
@@ -59580,7 +59819,7 @@ document.addEventListener('DOMContentLoaded', () => {
         ov.classList.add('ex-mask');
         var box = document.createElement('div');
         box.className = 'mg-box ex-page';
-        var tab = 'trade';
+        var tab = 'arb';
         var wal = TS_WORLDS[0].key;
         var quitting = false;
 
@@ -59680,6 +59919,175 @@ document.addEventListener('DOMContentLoaded', () => {
             return '<div class="ex-row"><div class="ex-ri"><i class="fas ' + (buy ? 'fa-cart-shopping' : 'fa-tag') + '"></i></div><div class="ex-rm"><div class="ex-rt">' + (buy ? '收购' : '出售') + ' ' + _esc(cm ? cm.name : o.com) + ' ×' + o.qty + '</div><div class="ex-rd">' + _esc(w2.name) + ' · 单价 <span class="ex-price">' + o.price + ' ' + _esc(w2.currencyName) + '</span> · D' + o.deadline + ' 前 · ' + _esc(who) + '</div>' + (quip ? '<div class="ex-quip">『' + _esc(who) + '：' + _esc(quip) + '』</div>' : '') + '</div><button type="button" class="ex-btn acc" data-ex="accept" data-i="' + i + '"' + (can ? '' : ' disabled') + '>接下</button></div>';
         }
 
+        /* ---------- 商机：跨世界套利计算（统一折算成时空币） ---------- */
+        /* 一件货在 k 世界卖掉能换回多少时空币 */
+        function arbSellChrono(k, comKey) {
+            var ps = TS.price(k, comKey), toll = TS.tollOf(k);
+            return ps * (1 - toll) * (1 - TS_SPREAD) / TS.rate(k);
+        }
+        /* 一件货在 k 世界买入需要多少时空币 */
+        function arbBuyChrono(k, comKey) {
+            return TS.price(k, comKey) / (TS.rate(k) * (1 - TS_SPREAD));
+        }
+        /* 手头存货：留在本地卖 vs 送去别处卖 */
+        function arbHoldList() {
+            var st = TS.ensure(), out = [];
+            TS_COMMODITIES.forEach(function (cm) {
+                var have = st.cargo[cm.key] || 0; if (have <= 0) return;
+                var here = arbSellChrono(wal, cm.key), best = null;
+                TS_WORLDS.forEach(function (w2) {
+                    if (w2.key === wal) return;
+                    var g = arbSellChrono(w2.key, cm.key);
+                    if (!best || g > best.gain) best = { world: w2, gain: g };
+                });
+                out.push({ cm: cm, have: have, here: here, best: best, diff: best ? (best.gain - here) : 0,
+                           total: best ? (best.gain - here) * have : 0 });
+            });
+            out.sort(function (a, b) { return b.total - a.total; });
+            return out;
+        }
+        /* 本地买入 → 运到哪卖，扣除关税与汇兑点差后的净利 */
+        function arbRouteList() {
+            var out = [];
+            TS_COMMODITIES.forEach(function (cm) {
+                var cost = arbBuyChrono(wal, cm.key), best = null;
+                TS_WORLDS.forEach(function (w2) {
+                    if (w2.key === wal) return;
+                    var g = arbSellChrono(w2.key, cm.key), net = g - cost;
+                    if (!best || net > best.net) best = { world: w2, net: net, sellPrice: TS.price(w2.key, cm.key) };
+                });
+                if (!best) return;
+                out.push({ cm: cm, cost: cost, best: best, roi: cost > 0 ? (best.net / cost) : 0 });
+            });
+            out.sort(function (a, b) { return b.best.net - a.best.net; });
+            return out;
+        }
+        /* 本页一键备货：兑足本币 → 尽量买满（受钱与舱位限制） */
+        function doArbBuy(comKey) {
+            var st = TS.ensure();
+            var price = TS.price(wal, comKey), capLeft = st.cargoCap - cargoCount();
+            if (capLeft <= 0) { _notify('货舱已经满了', 'info'); return false; }
+            var need = price * capLeft, local = st.wallets[wal] || 0;
+            if (local < need) {
+                var lack = need - local;
+                var chronoNeed = Math.ceil(lack / (TS.rate(wal) * (1 - TS_SPREAD)));
+                if (st.chrono < chronoNeed) chronoNeed = st.chrono;
+                if (chronoNeed > 0) doToLocal(chronoNeed);
+            }
+            st = TS.ensure();
+            var qty = Math.min(st.cargoCap - cargoCount(), Math.floor((st.wallets[wal] || 0) / TS.price(wal, comKey)));
+            if (qty <= 0) { _notify('时空币不够备货', 'info'); return false; }
+            return doBuy(comKey, qty);
+        }
+        /* 一键跑单：自动完成「换汇 → 在起点买入 → 跳到终点卖出 → 换回时空币」 */
+        function doArbRun(comKey, fromW, toW) {
+            var st = TS.ensure();
+            var r0 = TS.arb(comKey, fromW, toW, 1);
+            if (!r0) { _notify('这条路线算不出净利', 'info'); return false; }
+            var free = st.cargoCap - cargoCount();
+            if (free <= 0) { _notify('货舱满了，先卖掉一些', 'info'); return false; }
+            var qty = TS.arbFeasible(r0);
+            if (qty <= 0) { _notify('本钱或货舱不足，跑不了', 'info'); return false; }
+            qty = Math.min(qty, free);
+            var rr = TS.arb(comKey, fromW, toW, qty);
+
+            var prevWal = wal;
+            wal = fromW;
+            /* 1) 兑换足够的本币 */
+            var have = st.wallets[fromW] || 0;
+            if (have < rr.costLocal) {
+                var lack = rr.costLocal - have;
+                var needCh = Math.ceil(lack / (TS.rate(fromW) * (1 - TS_SPREAD)));
+                if (needCh > (TS.ensure().chrono || 0)) needCh = TS.ensure().chrono;
+                if (needCh > 0) doToLocal(needCh);
+            }
+            /* 2) 买入（可能因取整少买一件） */
+            st = TS.ensure();
+            qty = Math.min(qty, Math.floor((st.wallets[fromW] || 0) / TS.price(fromW, comKey)));
+            if (qty <= 0) { wal = prevWal; _notify('本币还是不够', 'info'); render(); return false; }
+            if (!doBuy(comKey, qty)) { wal = prevWal; render(); return false; }
+            /* 3) 跳到终点卖出 */
+            wal = toW;
+            if (!doSell(comKey, qty)) { wal = prevWal; render(); return false; }
+            /* 4) 落袋为安：换回时空币 */
+            var back = TS.ensure().wallets[toW] || 0;
+            if (back > 0) doToChrono(back);
+            /* 5) 结清跨界运费（预估里已算，这里必须真的扣掉） */
+            var fr = TS.freightOf(comKey, toW, qty);
+            st = TS.ensure();
+            var paid = Math.min(fr.total, st.chrono || 0);
+            if (paid > 0) {
+                st.chrono -= paid;
+                TS.log('支付跨界运费 ' + paid + ' 时空币（' + TS.com(comKey).name + ' ×' + qty + ' → ' + TS.world(toW).name + '）');
+            }
+            var st2 = TS.ensure();
+            TS.log('套利 ' + TS.com(comKey).name + ' ×' + qty + '：' + TS.world(fromW).name + ' → ' + TS.world(toW).name + '，到手 ' + st2.chrono + ' 时空币');
+            TS.save();
+            _notify('跑完一趟：' + TS.com(comKey).name + ' ×' + qty + '，' + TS.world(fromW).name + ' → ' + TS.world(toW).name + (paid > 0 ? '（运费 ' + paid + '）' : ''), 'success');
+            wal = toW; tab = 'arb'; render();
+            return true;
+        }
+        function arbHtml() {
+            var st = TS.ensure(), w = TS.world(wal), h = '';
+            h += '<div class="ex-note">把 6 个世界的<b>买入价、卖出关税、汇率点差</b>全部折算成时空币后排序。<br>净利 = 目标世界卖价×(1−关税)×(1−点差)÷汇率 − 本地买价÷汇率÷(1−点差)。</div>';
+            /* 全局最优：不只算「本地买」，而是扫遍 6×6 所有起点终点 */
+            var all = [];
+            try { all = TS.arbScan({ qty: 1, limit: 240 }); } catch (e) { all = []; }
+            if (all.length) {
+                h += '<div class="ex-sec">\u5168\u5c40\u6700\u4f18\u8def\u7ebf\uff08\u5355\u4ef6\u51c0\u5229\u6392\u5e8f\uff09</div>';
+                h += all.slice(0, 6).map(function (r) {
+                    var cm2 = TS.com(r.com), wA = TS.world(r.from), wB = TS.world(r.to);
+                    var n = 0, big = 0;
+                    try { n = TS.arbFeasible(r); if (n > 0) big = TS.arb(r.com, r.from, r.to, n).net; } catch (e) {}
+                    return '<div class="ex-row' + (r.netPer >= 3 ? ' ex-arb-hot' : '') + '"><div class="ex-ri"><i class="fas ' + cm2.icon + '"></i></div>'
+                        + '<div class="ex-rm"><div class="ex-rt">' + _esc(cm2.name) + '\uff1a' + _esc(wA.name) + ' \u2192 ' + _esc(wB.name) + '</div>'
+                        + '<div class="ex-rd">' + r.buyPrice + ' ' + _esc(wA.currencyName) + ' \u4e70 \u2192 ' + r.sellPrice + ' ' + _esc(wB.currencyName) + ' \u5356 \u00b7 \u5173\u7a0e ' + Math.round(r.toll * 100) + '% \u00b7 \u51c0\u5229 <b style="color:#8fe6d0">' + r.netPer + '</b> \u65f6\u7a7a\u5e01/\u4ef6 \u00b7 \u56de\u62a5 ' + Math.round(r.margin * 100) + '%</div>'
+                        + (n > 0 ? '<div class="ex-quip">\u73b0\u5728\u80fd\u5403\u4e0b <b>' + n + '</b> \u4ef6\uff0c\u7ea6\u8d5a <b style="color:#8fe6d0">' + big + '</b> \u65f6\u7a7a\u5e01</div>' : '<div class="ex-quip" style="opacity:.7">\u672c\u94b1\u6216\u8d27\u8231\u4e0d\u8db3</div>')
+                        + '</div><div class="ex-btns"><button type="button" class="ex-btn acc" data-ex="arbrun" data-com="' + r.com + '" data-from="' + r.from + '" data-to="' + r.to + '"' + (n > 0 ? '' : ' disabled') + '>\u8dd1\u4e00\u8d9f</button><button type="button" class="ex-btn" data-ex="arbgo" data-w="' + r.from + '">\u53bb\u8d77\u70b9</button></div></div>';
+                }).join('');
+            }
+            var hold = arbHoldList();
+            h += '<div class="ex-sec">手头存货 · 在哪卖最赚</div>';
+            if (!hold.length) {
+                h += '<div class="ex-empty">货舱是空的，先去「商品」买点货</div>';
+            } else {
+                h += hold.map(function (r) {
+                    var up = r.diff > 0.01;
+                    var line = '本地卖 ' + r.here.toFixed(1) + ' → ';
+                    if (up) line += '<b style="color:#8fe6d0">' + _esc(r.best.world.name) + ' 卖 ' + r.best.gain.toFixed(1) + '</b>（每件 +' + r.diff.toFixed(1) + '，共 +' + r.total.toFixed(0) + '）';
+                    else line += '就地卖最划算（' + r.here.toFixed(1) + ' 时空币/件）';
+                    return '<div class="ex-row' + (up ? ' ex-arb-hot' : '') + '"><div class="ex-ri"><i class="fas ' + r.cm.icon + '"></i></div>'
+                        + '<div class="ex-rm"><div class="ex-rt">' + _esc(r.cm.name) + ' ×' + r.have + '</div><div class="ex-rd">' + line + '</div></div>'
+                        + (up ? '<div class="ex-btns"><button type="button" class="ex-btn acc" data-ex="arbgo" data-w="' + _esc(r.best.world.key) + '">去 ' + _esc(r.best.world.name) + '</button></div>' : '')
+                        + '</div>';
+                }).join('');
+            }
+            var routes = arbRouteList().slice(0, 8);
+            h += '<div class="ex-sec">本地买入 · 运到哪卖（净利排序）</div>';
+            h += routes.map(function (r) {
+                var good = r.best.net > 0.5;
+                var cls = r.best.net > 5 ? 'ex-arb-hot' : (r.best.net > 0 ? '' : 'ex-arb-bad');
+                return '<div class="ex-row ' + cls + '"><div class="ex-ri"><i class="fas ' + r.cm.icon + '"></i></div>'
+                    + '<div class="ex-rm"><div class="ex-rt">' + _esc(r.cm.name) + ' → ' + _esc(r.best.world.name) + '</div>'
+                    + '<div class="ex-rd">本地买 ' + TS.price(wal, r.cm.key) + ' → 对岸卖 ' + r.best.sellPrice + '（关税 ' + Math.round(TS.tollOf(r.best.world.key) * 100) + '%）· '
+                    + '每件净 <b style="color:' + (good ? '#8fe6d0' : '#ff8f8f') + '">' + (r.best.net >= 0 ? '+' : '') + r.best.net.toFixed(1) + '</b> 时空币 · 回报 ' + Math.round(r.roi * 100) + '%</div></div>'
+                    + '<div class="ex-btns"><button type="button" class="ex-btn buy" data-ex="arbbuy" data-com="' + r.cm.key + '">备货</button>'
+                    + '<button type="button" class="ex-btn" data-ex="arbgo" data-w="' + _esc(r.best.world.key) + '">去卖</button></div></div>';
+            }).join('');
+            h += '<div class="ex-sec">当前世界价差速览</div>';
+            h += '<div class="ex-arb-grid">';
+            TS_COMMODITIES.forEach(function (cm) {
+                var base = cm.base, p = TS.price(wal, cm.key);
+                var d = Math.round((p / base - 1) * 100);
+                h += '<div class="ex-arb-cell"><i class="fas ' + cm.icon + '"></i><span>' + _esc(cm.name) + '</span>'
+                    + '<b style="color:' + (d > 8 ? '#ff8f8f' : (d < -8 ? '#8fe6d0' : 'inherit')) + '">' + (d >= 0 ? '+' : '') + d + '%</b></div>';
+            });
+            h += '</div>';
+            h += '<div class="ex-note" style="margin-top:8px">百分比是当前价相对基准价的偏离：<span style="color:#8fe6d0">绿＝便宜，适合买入</span>；<span style="color:#ff8f8f">红＝昂贵，适合卖出</span>。</div>';
+            h += '<div class="ex-sec">交易日志</div>' + logHtml();
+            return h;
+        }
+
         function contentHtml() {
             var st = TS.ensure(), w = TS.world(wal);
             var rate = TS.rate(wal), toll = TS.tollOf(wal), local = st.wallets[wal] || 0, capLeft = st.cargoCap - cargoCount();
@@ -59688,6 +60096,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 var ex2h = EX2.tabHtml(tab, window._ex2Ctx);
                 if (ex2h != null) return ex2h;
             }
+            if (tab === 'arb') { return arbHtml(); }
             if (tab === 'trade') {
                 h += '<div class="ex-note">当前世界 <b>' + _esc(w.name) + '</b> · ' + _esc(w.era) + ' · 时间流速 ×' + w.flow + '<br>1 时空币 ≈ ' + rate + ' ' + _esc(w.currencyName) + ' · 关税 ' + Math.round(toll * 100) + '% · 汇兑点差 ' + Math.round(TS_SPREAD * 100) + '%</div>';
                 h += '<div class="ex-sec">时间兑换</div>';
@@ -59702,11 +60111,23 @@ document.addEventListener('DOMContentLoaded', () => {
                 return h;
             }
             if (tab === 'goods') {
-                h += '<div class="ex-sec">' + _esc(w.name) + ' · 货舱 ' + cargoCount() + '/' + st.cargoCap + '</div>';
+                h += '<div class="ex-sec">' + _esc(w.name) + ' \u00b7 \u8d27\u8231 ' + cargoCount() + '/' + st.cargoCap + '</div>';
+                h += '<div class="ex-note">\u4ef7\u683c\u76f8\u5bf9\u8be5\u4e16\u754c\u57fa\u51c6\u4ef7\uff1a<span style="color:#8fe6d0">\u504f\u4f4e</span>\u9002\u5408\u4e70\u5165\uff0c<span style="color:#ff8f8f">\u504f\u9ad8</span>\u9002\u5408\u5356\u51fa\u3002</div>';
                 h += TS_COMMODITIES.map(function (cm) {
                     var price = TS.price(wal, cm.key), have = st.cargo[cm.key] || 0;
                     var can1 = local >= price && capLeft >= 1, can5 = local >= price * 5 && capLeft >= 5, canS = have >= 1;
-                    return '<div class="ex-row"><div class="ex-ri"><i class="fas ' + cm.icon + '"></i></div><div class="ex-rm"><div class="ex-rt">' + _esc(cm.name) + ' <span style="color:#8fe6d0;font-weight:700">' + _esc(TS_CAT_NAME[cm.cat] || '') + '</span></div><div class="ex-rd">单价 <span class="ex-price">' + price + ' ' + _esc(w.currencyName) + '</span> · 货舱 ' + have + '</div></div><div class="ex-btns"><button type="button" class="ex-btn buy" data-ex="buy" data-com="' + cm.key + '" data-qty="1"' + (can1 ? '' : ' disabled') + '>买1</button><button type="button" class="ex-btn buy" data-ex="buy" data-com="' + cm.key + '" data-qty="5"' + (can5 ? '' : ' disabled') + '>买5</button><button type="button" class="ex-btn sell" data-ex="sell" data-com="' + cm.key + '" data-qty="1"' + (canS ? '' : ' disabled') + '>卖1</button><button type="button" class="ex-btn sell" data-ex="sellAll" data-com="' + cm.key + '"' + (canS ? '' : ' disabled') + '>全卖</button></div></div>';
+                    var dv = TS.deviation(wal, cm.key), tr = TS.trend(wal, cm.key);
+                    var dvTag = Math.abs(dv) < 0.05 ? '<span style="color:var(--text-secondary)">\u57fa\u51c6</span>'
+                        : (dv < 0 ? '<span style="color:#8fe6d0">\u504f\u4f4e ' + Math.round(-dv * 100) + '%</span>' : '<span style="color:#ff8f8f">\u504f\u9ad8 ' + Math.round(dv * 100) + '%</span>');
+                    var trTag = Math.abs(tr) < 0.02 ? '<span style="color:var(--text-secondary)">\u2014</span>'
+                        : (tr > 0 ? '<span style="color:#ff8f8f">\u25b2' + Math.round(tr * 100) + '%</span>' : '<span style="color:#8fe6d0">\u25bc' + Math.round(-tr * 100) + '%</span>');
+                    var best = null;
+                    try { best = TS.arbScan({ qty: 1 }).filter(function (r) { return r.com === cm.key && r.from === wal; })[0]; } catch (e) { best = null; }
+                    return '<div class="ex-row"><div class="ex-ri"><i class="fas ' + cm.icon + '"></i></div><div class="ex-rm">'
+                        + '<div class="ex-rt">' + _esc(cm.name) + ' <span style="color:#8fe6d0;font-weight:700">' + _esc(TS_CAT_NAME[cm.cat] || '') + '</span></div>'
+                        + '<div class="ex-rd">\u5355\u4ef7 <span class="ex-price">' + price + ' ' + _esc(w.currencyName) + '</span> \u00b7 ' + dvTag + ' ' + trTag + ' \u00b7 \u8d27\u8231 ' + have + '</div>'
+                        + (best ? '<div class="ex-quip">\u6700\u4f18\u9500\u8def\uff1a' + _esc(TS.world(best.to).name) + '\uff0c\u6263\u5b8c\u5173\u7a0e\u6c47\u5dee\u51c0\u8d5a <b style="color:#8fe6d0">' + best.netPer + '</b> \u65f6\u7a7a\u5e01/\u4ef6</div>' : '')
+                        + '</div><div class="ex-btns"><button type="button" class="ex-btn buy" data-ex="buy" data-com="' + cm.key + '" data-qty="1"' + (can1 ? '' : ' disabled') + '>\u4e701</button><button type="button" class="ex-btn buy" data-ex="buy" data-com="' + cm.key + '" data-qty="5"' + (can5 ? '' : ' disabled') + '>\u4e705</button><button type="button" class="ex-btn sell" data-ex="sell" data-com="' + cm.key + '" data-qty="1"' + (canS ? '' : ' disabled') + '>\u53561</button><button type="button" class="ex-btn sellAll" data-com="' + cm.key + '"' + (canS ? '' : ' disabled') + '>\u5168\u5356</button></div></div>';
                 }).join('');
                 return h;
             }
@@ -59751,7 +60172,7 @@ document.addEventListener('DOMContentLoaded', () => {
             var lnEl = $id('ex-local-name'); if (lnEl) lnEl.textContent = w.currencyName;
             var tabsEl = $id('ex-tabs');
             if (tabsEl) {
-                tabsEl.innerHTML = [['trade', '兑换'], ['goods', '商品'], ['cargo', '货舱'], ['intel', '行情'], ['orders', '委托'], ['events', '事件'], ['contract', '合约'], ['smuggle', '暗线'], ['consign', '寄售'], ['auction', '拍卖'], ['loan', '借贷'], ['token', '信物'], ['chapter', '章节'], ['credit', '信誉'], ['shop', '店铺'], ['mall', '商城'], ['book', '交易行'], ['barter', '易物']].map(function (t) {
+                tabsEl.innerHTML = [['arb', '商机'], ['trade', '兑换'], ['goods', '商品'], ['cargo', '货舱'], ['intel', '行情'], ['orders', '委托'], ['events', '事件'], ['contract', '合约'], ['smuggle', '暗线'], ['consign', '寄售'], ['auction', '拍卖'], ['loan', '借贷'], ['token', '信物'], ['chapter', '章节'], ['credit', '信誉'], ['shop', '店铺'], ['mall', '商城'], ['book', '交易行'], ['barter', '易物']].map(function (t) {
                     return '<button type="button" class="ex-tab' + (t[0] === tab ? ' on' : '') + '" data-extab="' + t[0] + '">' + t[1] + '</button>';
                 }).join('');
             }
@@ -59795,6 +60216,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (a === 'buy') { doBuy(b.getAttribute('data-com'), Number(b.getAttribute('data-qty')) || 1); return; }
                 if (a === 'sell') { doSell(b.getAttribute('data-com'), Number(b.getAttribute('data-qty')) || 1); return; }
                 if (a === 'sellAll') { doSell(b.getAttribute('data-com'), TS.ensure().cargo[b.getAttribute('data-com')] || 0); return; }
+                if (a === 'buymax') { var st9 = TS.ensure(); var q9 = Math.min(st9.cargoCap - cargoCount(), Math.floor((st9.wallets[wal] || 0) / TS.price(wal, b.getAttribute('data-com')))); if (q9 > 0) doBuy(b.getAttribute('data-com'), q9); else _notify('钱或舱位不够', 'info'); return; }
+                if (a === 'arbbuy') { var ok9 = doArbBuy(b.getAttribute('data-com')); if (ok9) _notify('备货完成，去目标世界卖掉即可', 'success'); return; }
+                if (a === 'arbrun') { doArbRun(b.getAttribute('data-com'), b.getAttribute('data-from'), b.getAttribute('data-to')); return; }
+                if (a === 'arbgo') { var wk9 = b.getAttribute('data-w'); if (wk9 && wk9 !== wal) { wal = wk9; tab = 'arb'; render(); _notify('已抵达 ' + TS.world(wk9).name, 'info'); } return; }
                 if (a === 'intel') { var it = TS.publishIntel(b.getAttribute('data-cid')); render(); if (TS.com(it.com)) _notify((it.verified ? '已核实：' : '传闻：') + TS.com(it.com).name + (it.dir === 'up' ? ' 看涨' : ' 看跌'), 'info'); return; }
                 if (a === 'accept') { doAccept(Number(b.getAttribute('data-i'))); return; }
                 if (a === 'specdeliver') { var spid = b.getAttribute('data-spec'); var rr = TS.deliverSpecialty(spid); if (rr && rr.ok) _notify('特产交付成功，+' + rr.reward + ' 时空币', 'success'); else _notify(rr && rr.reason === 'short' ? '农场仓库里不够了' : '交付失败', 'info'); render(); return; }
@@ -67420,6 +67845,8 @@ window.CARD_FACE_SVG = {"tarot":{"愚人":{"svg":"<path d=\"M25 105 L30 88 L42 8
                 if (_deep) html += _deep;
                 var _dom = (typeof window.tarotDomainsHtml === 'function') ? window.tarotDomainsHtml(item.name, isUp) : '';
                 if (_dom) html += _dom;
+                var _fld = (typeof window.tarotFieldHtml === 'function') ? window.tarotFieldHtml(item.name, isUp) : '';
+                if (_fld) html += _fld;
                 var _guide = (typeof window.tarotGuideHtml === 'function') ? window.tarotGuideHtml(item.name, isUp) : '';
                 if (_guide) html += _guide;
                 var _lost = (typeof window.lostTarotHtml === 'function') ? window.lostTarotHtml(item.name, isUp) : '';
@@ -67456,6 +67883,8 @@ window.CARD_FACE_SVG = {"tarot":{"愚人":{"svg":"<path d=\"M25 105 L30 88 L42 8
                 if (typeof window.lenoPcHtml === 'function') html += window.lenoPcHtml(item.key);
                 if (typeof window.lenoMoreHtml === 'function') html += window.lenoMoreHtml(item.key);
                 if (typeof window.lenoFxHtml === 'function') html += window.lenoFxHtml(item.key);
+                if (typeof window.lenoCb2Html === 'function') html += window.lenoCb2Html(item.key);
+                if (typeof window.lenoReadHtml === 'function') html += window.lenoReadHtml(item.key);
                 var _llost = (typeof window.lostLenoHtml === 'function') ? window.lostLenoHtml(item.key) : '';
                 if (_llost) html += _llost;
                 var _lmj = (typeof window.mjLenoBlock === 'function') ? window.mjLenoBlock(item.key) : '';
@@ -73747,6 +74176,179 @@ window.IM_DICT = {
 
 
 
+
+    /* =========================================================================
+     *  实战六域 · 塔罗 78（热门塔罗师通用分域格式：恋爱 / 工作 / 金钱 / 学业 / 人际 / 建议）
+     *  u = 正位六域，r = 逆位六域（顺序固定：恋爱、工作、金钱、学业、人际、建议）
+     * ========================================================================= */
+    var TAROT_FIELD = {
+        /* ---- 大阿卡纳 ---- */
+        '愚人': { u: ['新的开始，轻装上阵','新项目新机会，敢闯就有','财务别太随性','换方向、重新开始','会认识新的人','先动起来，别想太多'],
+                  r: ['太轻率，落不了地','准备不足就上手','冲动花钱','心不定，坐不住','社交上冒失','想清楚再动'] },
+        '魔术师': { u: ['主动就有，能谈成','资源盘得活，能落地','进财有门路','学得进、用得上','沟通顺畅','把手上的东西用起来'],
+                    r: ['话好听但不实','想法多落地少','财务别冒进','学而不化','别被话术带跑','先补能力再开口'] },
+        '女祭司': { u: ['暧昧、暗恋、不明说','按部就班就好','保守理财','适合深挖研究','保持距离','先听，别急着表态'],
+                    r: ['藏着不说，误会加深','信息不对称','账没算清','钻牛角尖','猜疑多','把话说开'] },
+        '女帝': { u: ['被照顾、感情丰盛','产出好、有成果','收成不错','吸收得快','人缘好','允许自己享受'],
+                  r: ['过度付出，掏空自己','产出卡住','花销过头','学得杂而不精','关系里失衡','先照顾自己'] },
+        '皇帝': { u: ['对方很稳、有担当','制度与权力说了算','财务稳健','纪律型学习有效','有主事的人','立规矩'],
+                  r: ['控制欲强、压制','僵化、流程卡人','财务被卡','死记硬背效率低','强势对立','别硬碰，找规则空档'] },
+        '教皇': { u: ['关系被认可、走向正式','走正规渠道','稳妥保守','跟老师学、考证书','长辈贵人帮忙','按规矩来'],
+                  r: ['被世俗标准绑住','流程繁琐','不敢冒险','学得太教条','圈子压力','可以不必照做'] },
+        '恋人': { u: ['双向、被选定','合作契合','合伙有利','选对方向','投缘','做出选择'],
+                  r: ['摇摆、三角','合作不合拍','利益分配争议','选不定','站队为难','别拖，先明确'] },
+        '战车': { u: ['主动推进，能成','攻坚、进度快','靠执行力挣钱','冲劲足','掌控局面','定目标，一路推'],
+                  r: ['方向乱、内耗','推进受阻','用力过猛反亏','三分钟热度','争强好胜','先定方向再冲'] },
+        '力量': { u: ['温柔但有分量','以柔克刚','稳中求财','耐心打磨','能化解矛盾','用耐性，不用蛮力'],
+                  r: ['情绪压不住','底气不足','不敢争取','容易放弃','被情绪牵着走','先稳住自己'] },
+        '隐士': { u: ['需要空间、先独处','沉淀期，别扩张','收缩开支','适合闭关苦读','社交减少','给自己一段时间'],
+                  r: ['冷战、回避','闭门造车','该花的省错地方','钻进去出不来','孤立','别躲，说一句'] },
+        '命运之轮': { u: ['转机出现','时机到了','有意外之财','运势上行','新圈子','顺势，别逆着来'],
+                      r: ['反复、原地打转','时机未到','财运反复','状态起伏','旧人旧事回头','等一等，别硬推'] },
+        '正义': { u: ['关系要讲清楚','按契约办事','账目清楚','公平评判','讲理不偏袒','把话说清楚、担责'],
+                  r: ['不公平、偏心','有纠纷','账不清','标准不一','互相指责','先认自己的部分'] },
+        '倒吊人': { u: ['暂时僵住，别急','暂停等待','钱先压着','换个思路','牺牲自己成全','换位想，再等'],
+                    r: ['白等、白牺牲','拖延无果','迟迟不到账','方法不对','单方面付出','别再耗，换路'] },
+        '死神': { u: ['结束一段，才能开始','旧的收掉','断掉亏损','彻底换学法','关系洗牌','该断就断'],
+                  r: ['拖着不放','想改又不敢','亏损拖着','旧习惯改不掉','藕断丝连','别拖尾'] },
+        '节制': { u: ['慢慢来，节奏对','稳步推进','收支平衡','循序渐进','相处舒服','调比例，别走极端'],
+                  r: ['忽冷忽热','节奏乱','花销失控','进度两极','磨合不顺','找回中间值'] },
+        '恶魔': { u: ['纠缠、离不开','被绑住、身不由己','被钱绑住','沉迷某件事','控制型关系','看看绑住你的是什么'],
+                  r: ['在松绑','挣脱消耗','开始脱身','戒掉坏习惯','离开控制','先承认，再放手'] },
+        '高塔': { u: ['突然破裂','突发变动','意外支出','计划被打断','翻脸','真相摊开，重建'],
+                  r: ['勉强撑着','小震荡','躲过一劫','延迟爆发','表面和气','隐患别再压'] },
+        '星星': { u: ['有希望、在变好','看到方向','慢慢回暖','有灵感','坦诚相待','保持希望，慢慢来'],
+                  r: ['失望、泄气','看不到出路','回报慢','没动力','疏远','先休息，别否定自己'] },
+        '月亮': { u: ['看不清、有隐瞒','信息不明','账目含糊','方向模糊','流言误会','别猜，去确认'],
+                  r: ['雾在散','情况明朗','看清账目','想明白了','误会解开','真相开始出来'] },
+        '太阳': { u: ['明朗、被看见','成功、有认可','进账','状态好','关系热络','坦荡去做'],
+                  r: ['表面光鲜','被捧却虚','花得比赚得快','眼高手低','热闹但不深','收一点，别飘'] },
+        '审判': { u: ['重新来过的机会','复盘后有转折','旧账了结','考运回升','和解','回头看，做个了断'],
+                  r: ['不肯面对','错过时机','旧账未清','回避复盘','心结未解','别逃，先承认'] },
+        '世界': { u: ['圆满、修成正果','收官、有结果','长期收益','学业完成','圈子完整','收尾，画句号'],
+                  r: ['差一步','收不了尾','尾款未到','卡在最后','关系没闭环','把最后的补上'] },
+
+        /* ---- 权杖 · 火 ---- */
+        '权杖一': { u: ['心动、有火花','新项目启动','新的进财机会','新兴趣起步','新关系','趁热开始'],
+                    r: ['热情退了','启动不了','机会没抓住','提不起劲','冷场','先把火点起来'] },
+        '权杖二': { u: ['在观望、做打算','规划布局','长远打算','定方向','等对方表态','想远一点再动'],
+                    r: ['犹豫错过','格局不够','不敢投入','选不定','怕做决定','别只想，划条线'] },
+        '权杖三': { u: ['有进展、往外走','扩张、等待成果','投入有回报','视野打开','远方的人','把格局放大'],
+                    r: ['延迟、落空','准备不足','回报晚','计划太散','孤军','先补短板'] },
+        '权杖四': { u: ['安稳、被接纳','团队稳固','收支稳定','环境适合','氛围和睦','庆祝一下，稳住'],
+                    r: ['根基动摇','内部不合','家宅开销','环境不稳','不被接纳','先把地基补牢'] },
+        '权杖五': { u: ['争、较劲','竞争激烈','多方争利','比拼','意见不合','吵完就好，别记仇'],
+                    r: ['内耗、窝里斗','无效会议','内部分利','心散','表面和气','减少无谓争'] },
+        '权杖六': { u: ['被认可、占上风','有成绩、被表扬','回报到手','考得好','受欢迎','享受成果，别飘'],
+                    r: ['虚名一场','功劳被抢','得而复失','得意忘形','被冷落','成绩归零，重新来'] },
+        '权杖七': { u: ['守住立场','顶住压力','护住已有的','坚持住','面对质疑','别退，坚持'],
+                    r: ['扛不住','防线崩','压力过大','撑不下去','被围攻','该撤就撤'] },
+        '权杖八': { u: ['进展飞快','事情急速推进','钱来得快','进度猛','消息频繁','趁快处理'],
+                    r: ['延误、乱','节奏打乱','款项卡住','进度乱','沟通误会','慢下来核对'] },
+        '权杖九': { u: ['伤后仍站着','最后一道坎','守成','坚持到最后','防备心重','再撑一下'],
+                    r: ['筋疲力尽','防线松','怕了','撑不住','过度戒备','先休息'] },
+        '权杖十': { u: ['扛太多','责任压身','重担','负担过重','被依赖','分出去一些'],
+                    r: ['卸下重担','学会放手','减压','减量','不再独扛','该放的放'] },
+        '权杖侍者': { u: ['热情试探','新尝试','小额机会','新学一样','活泼的人','大胆试'],
+                      r: ['三分钟热度','不定性','小钱乱花','学不进去','嘴上热闹','专注一件'] },
+        '权杖骑士': { u: ['主动出击','冲劲足','敢投入','行动派','热烈','冲，但别过头'],
+                      r: ['莽撞','半途而废','冲动花销','虎头蛇尾','脾气急','想好落点再冲'] },
+        '权杖女王': { u: ['有魅力、被吸引','有感染力','能谈成','状态好','人缘热','自信去做'],
+                      r: ['嫉妒、控制','强势压人','争利','好胜心过重','关系紧张','收起锋芒'] },
+        '权杖国王': { u: ['有主见、能扛事','掌舵、有远见','财运在握','有章法','领头的人','拿主意，拍板'],
+                      r: ['独断、不听人','好大喜功','贪大','眼高手低','压人一头','听一句再定'] },
+
+        /* ---- 圣杯 · 水 ---- */
+        '圣杯一': { u: ['心动开始','氛围变好','意外的好消息','喜欢上','善意','敞开心'],
+                    r: ['情感冷淡','没热情','错过机会','提不起兴趣','疏离','先把心打开'] },
+        '圣杯二': { u: ['双向、契合','合作愉快','互利','互相帮助','投缘','平等相待'],
+                    r: ['不对等','合作裂','利益不均','配合差','冷战','把话说平'] },
+        '圣杯三': { u: ['聚会、热闹','团队欢庆','有分红','一起学','朋友圈','和人多走动'],
+                    r: ['被排挤','圈子散','分摊不均','分心','是非多','少掺和'] },
+        '圣杯四': { u: ['提不起劲','倦怠、没新鲜感','不积极','学得腻','懒得应酬','换个角度看'],
+                    r: ['重新有兴趣','机会来了','愿意投入','找回动力','重新参与','接住眼前这个'] },
+        '圣杯五': { u: ['失落、遗憾','结果不理想','亏损','成绩不理想','失望','看还剩什么'],
+                    r: ['在恢复','慢慢好转','止损','重新开始','和解','往前看'] },
+        '圣杯六': { u: ['旧情、回忆','回到熟悉','旧账','复习有效','老朋友','怀旧可以，别停'],
+                    r: ['困在过去','走老路','旧问题','不肯更新','断不开','往前走'] },
+        '圣杯七': { u: ['想太多、看不清','选项太多','想发财','什么都想学','看不透人','挑一个落地'],
+                    r: ['看清楚了','选定','放弃幻想','定下来','认清人','做选择'] },
+        '圣杯八': { u: ['想走、抽身','换个环境','放弃这块','转方向','淡出','该走就走'],
+                    r: ['舍不得走','勉强留下','拖着','不甘心','藕断丝连','别将就'] },
+        '圣杯九': { u: ['满足、如愿','愿望达成','收获得满意','考得好','被善待','享受当下'],
+                    r: ['不满足','表面光鲜','贪','自满','被讨好','别被满足感骗'] },
+        '圣杯十': { u: ['圆满、一家','合作圆满','家庭财务稳','环境和谐','亲密','珍惜眼前的'],
+                    r: ['家里不合','氛围散','家宅开销','环境压抑','不睦','先修关系'] },
+        '圣杯侍者': { u: ['心动、敏感','有灵感','小意外之喜','有感觉','温柔的人','跟着感觉走'],
+                      r: ['太敏感','不成熟','想太多','不踏实','玻璃心','别脑补'] },
+        '圣杯骑士': { u: ['示好、邀约','带来机会','有人送好处','有想象力','浪漫','表达出来'],
+                      r: ['画大饼','不实','承诺不兑现','三心二意','情绪化','看行动别听话'] },
+        '圣杯女王': { u: ['被理解、被容纳','氛围好','贴心照顾','感受力强','善解人意','先照顾情绪'],
+                      r: ['过度付出','被消耗','心软吃亏','情绪化','依赖','立边界'] },
+        '圣杯国王': { u: ['稳重深情','有分寸','理财稳','沉得住气','可靠的人','情绪稳定地谈'],
+                      r: ['压抑不说','冷淡','抠','表面功夫','操控','有话直说'] },
+
+        /* ---- 宝剑 · 风 ---- */
+        '宝剑一': { u: ['想明白了','有决断','看清楚','思路清','说开了','一刀切开'],
+                    r: ['想乱了','判断失误','算错','思路堵','话说重','先理清楚'] },
+        '宝剑二': { u: ['僵住、不选','两难','账压着','卡住','回避','别再拖'],
+                    r: ['僵局松动','开口了','理清','想通','摊牌','面对'] },
+        '宝剑三': { u: ['心痛、受伤','坏消息','破财','打击','被伤','承认疼'],
+                    r: ['在愈合','慢慢好','止损','缓过来','和解','给自己时间'] },
+        '宝剑四': { u: ['需要休息','暂停','停一停','休整','少来往','先歇'],
+                    r: ['休息不够','硬撑','被迫开工','透支','焦虑','强制停一下'] },
+        '宝剑五': { u: ['争输赢','两败','损人不利己','恶性竞争','撕破脸','赢了也没意思'],
+                    r: ['和解','退出争斗','止损','放下','修复','认输也是一种赢'] },
+        '宝剑六': { u: ['离开、过渡','换环境','慢慢好转','转学转岗','渐行渐远','过渡期，慢慢走'],
+                    r: ['走不掉','困在原处','问题跟着','回头','卡住','别回头'] },
+        '宝剑七': { u: ['有隐瞒','绕着走','偷偷','投机','不坦诚','别耍小聪明'],
+                    r: ['被拆穿','坦白','计谋失败','承认','说开','老实一点'] },
+        '宝剑八': { u: ['困住、动不了','被限制','被套','想不通','被流言困','其实门没锁'],
+                    r: ['松开','看清','脱身','想通','不再被困','走出来'] },
+        '宝剑九': { u: ['焦虑、失眠','压力大','怕亏','担心成绩','想太多','别在夜里想事'],
+                    r: ['焦虑减轻','睡得着','缓过来','放下','能说出口','天亮再说'] },
+        '宝剑十': { u: ['到底了','彻底结束','亏到底','崩','断','触底才会反弹'],
+                    r: ['慢慢复原','躲过最坏','好转','缓过来','重建','一点点来'] },
+        '宝剑侍者': { u: ['好奇、打听','消息灵通','探听行情','想学','多话','多问多看'],
+                      r: ['口无遮拦','说错话','传错','分心','多疑','说话前过一遍'] },
+        '宝剑骑士': { u: ['行动快','说干就干','快速推进','冲刺','直接','快，但别撞'],
+                      r: ['莽撞','横冲直撞','出乱子','急躁','伤人','慢半拍想'] },
+        '宝剑女王': { u: ['看得透','有边界','判断准','清醒','说清楚','理性但不冷'],
+                      r: ['刻薄','防备重','话说绝','挑刺','冷淡','留一点余地'] },
+        '宝剑国王': { u: ['讲原则','拍板','说理','有标准','公正','按规则办'],
+                      r: ['专断','用道理压人','不讲情','控制','冷酷','讲理也要讲情'] },
+
+        /* ---- 星币 · 土 ---- */
+        '星币一': { u: ['关系落地','新机会','进财的种子','实用的开始','实在','落到实'],
+                    r: ['落不了地','机会错失','钱没影','计划空','不实','先做第一步'] },
+        '星币二': { u: ['两头兼顾','多线并行','周转','两边忙','来回应酬','别崩，慢慢转'],
+                    r: ['顾不过来','失衡','周转不开','分身乏术','手忙脚乱','砍掉一条线'] },
+        '星币三': { u: ['合作有成果','被认可','有收入','技能变现','配合好','把本事秀出来'],
+                    r: ['配合差','不被看见','分工乱','学习卡','各做各','磨合节奏'] },
+        '星币四': { u: ['守住不放','稳','攒钱','保守','不轻易交心','握紧可以，别僵'],
+                    r: ['松手','开始花','散财','放开','不再防','该花的花'] },
+        '星币五': { u: ['窘迫、缺','低谷','钱紧','困难','被冷落','求助不丢人'],
+                    r: ['熬过去','好转','找到支援','慢慢补','回暖','撑过去就有'] },
+        '星币六': { u: ['有来有往','被帮、帮人','收付平衡','被带','互相关照','接受也要给'],
+                    r: ['不对等','被占便宜','条件多','单方面','施恩图报','看清条件'] },
+        '星币七': { u: ['等成果','长期投入','等回报','积累期','慢慢养','再等等'],
+                    r: ['没进展','白等','回报不来','方向错','等不到','换个种法'] },
+        '星币八': { u: ['认真磨','慢但用心','一点点挣','反复练','踏实','慢慢做，别急'],
+                    r: ['敷衍','倦怠','偷工','厌了','马虎','找回手感'] },
+        '星币九': { u: ['自在、独处也安','独立有成果','财务自主','自学有效','有分寸','享受自己的'],
+                    r: ['依赖人','缺钱','太孤立','闭门','孤僻','别用物质填空'] },
+        '星币十': { u: ['稳固长久','家族、根基','家底厚','长期收益','世代','看长线'],
+                    r: ['家宅不安','根基动','破财','中断','家里事','守好基本盘'] },
+        '星币侍者': { u: ['踏实起步','新手机会','小收入','开始学','诚恳','从基础做起'],
+                      r: ['懒','只想不做','没计划','不肯下功','空想','动起来'] },
+        '星币骑士': { u: ['可靠、按部就班','稳步推进','稳定收入','按计划','实在','一步步走'],
+                      r: ['太慢','固执','停滞','不动','僵','加点速度'] },
+        '星币女王': { u: ['被照顾','务实、能落地','会理财','学得实用','贴心','把日子过好'],
+                      r: ['太现实','忽略感受','抠','只顾实用','照顾过头','留点给自己'] },
+        '星币国王': { u: ['有实力','掌得稳','财运稳','资源足','可靠','用实力说话'],
+                      r: ['太功利','贪','用钱压人','固执','现实过头','别只剩算计'] }
+    };
+
     /* =========================================================================
      *  延伸方向 · 塔罗 78（综合多家塔罗师资料的补充方向词）
      *  up2 / rev2：核心关键词之外的延伸方向，覆盖 感情 / 现实 / 状态 / 人物
@@ -74449,6 +75051,39 @@ window.IM_DICT = {
         2: '强是', 1: '偏是', 0: '中性／看条件', '-1': '偏否', '-2': '强否'
     };
 
+    /* 实战速查 · 塔罗六域短语（热门塔罗师的分域速查格式：恋爱 / 工作 / 金钱 / 学业 / 人际 / 建议） */
+    var TAROT_FIELD_LB = ['恋爱', '工作', '金钱', '学业', '人际', '建议'];
+    window.TAROT_FIELD = TAROT_FIELD;
+    window.tarotFieldHtml = function (name, isUpright) {
+        try {
+            var f = TAROT_FIELD && TAROT_FIELD[name];
+            if (!f) return '';
+            var arr = (isUpright === false) ? (f.r || f.u) : (f.u || f.r);
+            if (!arr || !arr.length) return '';
+            var h = '<div class="cr-detail-block"><div class="cr-detail-bhead"><i class="fas fa-bolt"></i>实战速查 · 六域短语' + ((isUpright === false) ? '（逆位）' : '（正位）') + '</div><div class="cr-detail-btext">';
+            h += '<div class="fld-grid">';
+            for (var i = 0; i < arr.length; i++) {
+                h += '<div class="fld-cell"><span class="fld-lb">' + TAROT_FIELD_LB[i] + '</span><span class="fld-v">' + mjEsc(arr[i]) + '</span></div>';
+            }
+            h += '</div>';
+            h += '<div class="kw-note">速查用。长篇分域解读见上方「六大领域」；这里的短语是落点提示，不替代完整牌义。</div>';
+            h += '</div></div>';
+            return h;
+        } catch (e) { return ''; }
+    };
+    (function () {
+        if (document.getElementById('tarot-field-style')) return;
+        var st = document.createElement('style');
+        st.id = 'tarot-field-style';
+        st.textContent = [
+            '.fld-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:6px;}',
+            '.fld-cell{display:flex;align-items:flex-start;gap:5px;padding:6px 7px;border-radius:9px;background:var(--primary-bg);border:1px solid var(--border-color);}',
+            '.fld-lb{flex-shrink:0;font-size:10px;font-weight:700;color:#fff;background:var(--accent-color);border-radius:5px;padding:1px 5px;line-height:1.5;}',
+            '.fld-v{font-size:11px;line-height:1.55;color:var(--text-primary);}'
+        ].join('');
+        (document.head || document.documentElement).appendChild(st);
+    })();
+
     /* 经典双牌组合：雷诺曼的语法是「造句」，不是背单词
        ★ ＝ 有明确文献出处；其余按 taught 语法（名词+形容词 / 动作+对象）组合 */
     var LENO_CB = {
@@ -74495,6 +75130,119 @@ window.IM_DICT = {
     };
 
     window.LENO_NF = LENO_NF; window.LENO_YN = LENO_YN; window.LENO_CB = LENO_CB;
+
+    /* 组合实战句（扩充）：与上面「经典组合」不重复，偏日常口语的答案式读法
+       写法沿用 Emily Rose / 家思宇一派：A + B ＝ 直接说成一句话 */
+    var LENO_CB2 = {
+        1:  ['骑士 + 市场：工作上有新动静，招聘或调动的消息', '骑士 + 老鼠：消息带来损耗，或有人在背后搞小动作', '骑士 + 山：消息被卡住，迟迟不来'],
+        2:  ['四叶草 + 市场：一份轻松的兼职、意外的小收入', '四叶草 + 山：小运气挡不住大阻碍', '四叶草 + 钥匙：运气正好落在关键点上'],
+        3:  ['船 + 市场：跨境生意、外贸', '船 + 山：行程受阻，走不成', '船 + 锚：远行后安定下来，或船靠港'],
+        4:  ['房屋 + 市场：在家办公、家庭生意', '房屋 + 山：与家人隔着什么、家里有阻碍', '房屋 + 钥匙：房子的事有解，或拿到钥匙'],
+        5:  ['树 + 市场：长期稳定的工作', '树 + 山：健康问题拖很久', '树 + 十字架：慢性病或长期背负'],
+        6:  ['乌云 + 月亮：看不清自己的名声，或被流言遮住', '乌云 + 市场：工作上的状况不明', '乌云 + 锚：困惑还要持续一阵'],
+        7:  ['蛇 + 市场：职场里的弯弯绕绕、需要周旋', '蛇 + 房屋：家里有隐藏的问题（水管、线路）', '蛇 + 床：复杂的亲密关系、性层面的纠葛'],
+        8:  ['棺材 + 市场：这份工作结束，或停工', '棺材 + 老鼠：损耗停止，或因病停工', '棺材 + 太阳：最坏的部分过去了'],
+        9:  ['花束 + 市场：工作上的奖励、被认可', '花束 + 月亮：因名声而来的好处', '花束 + 床：愉悦的亲密、被宠爱'],
+        10: ['镰刀 + 市场：突然离职、项目被砍', '镰刀 + 房屋：家里有需要立刻处理的事', '镰刀 + 树：手术、或健康问题被切掉'],
+        11: ['鞭子 + 市场：职场摩擦、反复的争执', '鞭子 + 床：激烈的性、或亲密里的拉扯', '鞭子 + 孩童：为孩子的事反复吵'],
+        12: ['鸟儿 + 市场：工作上的交涉、谈判', '鸟儿 + 床：枕边话、深夜长谈', '鸟儿 + 书：关于秘密的对话'],
+        13: ['孩童 + 市场：新手入职、初级岗位', '孩童 + 床：怀孕、新生命', '孩童 + 书：刚开始学、启蒙'],
+        14: ['狐狸 + 市场：这份工作需要动脑周旋', '狐狸 + 床：关系里有隐瞒', '狐狸 + 钥匙：解法不太正当，或以巧劲解开'],
+        15: ['熊 + 市场：老板、有资源的一方', '熊 + 鱼：大笔资金、财务实力', '熊 + 床：强势的亲密、占有欲'],
+        16: ['星星 + 市场：职业方向清晰、线上事业', '星星 + 床：关于未来的憧憬，或异地的心动', '星星 + 山：希望被挡住，路还远'],
+        17: ['鹳鸟 + 市场：换工作、岗位变动', '鹳鸟 + 房屋：搬家', '鹳鸟 + 床：关系进入新阶段'],
+        18: ['狗 + 市场：同事、职场上的自己人', '狗 + 床：忠诚的伴侣、陪伴式的亲密', '狗 + 钥匙：靠人脉拿到机会'],
+        19: ['高塔 + 市场：大公司、体制内、办公楼', '高塔 + 心：关系里有距离感、够不着', '高塔 + 床：独处、分房或孤单的亲密'],
+        20: ['花园 + 市场：公开经营、门店生意', '花园 + 床：关系被公开，或人多口杂影响私密', '花园 + 狐狸：圈子里有小人'],
+        21: ['山 + 市场：工作上的硬阻碍、晋升卡住', '山 + 心：感情隔着什么、 hardness', '山 + 床：亲密里的隔阂'],
+        22: ['十字路口 + 市场：两个offer、职业分叉', '十字路口 + 床：在两个人之间', '十字路口 + 锚：选了之后就长期定了'],
+        23: ['老鼠 + 市场：工作消耗人、职场偷窃', '老鼠 + 床：亲密关系被慢慢磨掉', '老鼠 + 钥匙：关键的东西被损耗'],
+        24: ['心 + 市场：热爱这份工作，或办公室恋情', '心 + 床：身心合一的亲密', '心 + 山：感情里有阻碍'],
+        25: ['指环 + 市场：劳动合同、正式录用', '指环 + 床：同居或婚姻层面的绑定', '指环 + 老鼠：合约在损耗、合作被啃'],
+        26: ['书 + 市场：需要资质、考证、行业知识', '书 + 床：不为人知的亲密', '书 + 钥匙：秘密被揭开'],
+        27: ['信件 + 市场：offer、录用通知', '信件 + 床：情书、私密的文字', '信件 + 山：文件卡住、消息延迟'],
+        28: ['男士 + 市场：男性上司、男同事', '男士 + 床：他与亲密关系有关', '男士 + 狐狸：这个男人有算计'],
+        29: ['女士 + 市场：女性上司、女同事', '女士 + 床：她与亲密关系有关', '女士 + 狐狸：这个女人有算计'],
+        30: ['百合 + 市场：资深岗位、靠资历', '百合 + 床：成熟的性、长久的亲密', '百合 + 心：旧情、或安静的爱'],
+        31: ['太阳 + 市场：事业上的高光、被看见', '太阳 + 床：坦荡的亲密、没有隐瞒', '太阳 + 十字架：成功但带着负担'],
+        32: ['月亮 + 市场：靠名气吃饭的工作（自媒体、创作）', '月亮 + 床：夜里的亲密、情绪化的性', '月亮 + 心：感受被放大，容易上头'],
+        33: ['钥匙 + 市场：找到工作的解法、面试通过', '钥匙 + 床：亲密关系的关键一步', '钥匙 + 山：阻碍有办法解开'],
+        34: ['鱼 + 市场：生意往来、现金流', '鱼 + 床：为钱维系的亲密', '鱼 + 山：财务被卡住'],
+        35: ['锚 + 市场：稳定的工作、长期岗位', '锚 + 床：稳定的同居关系', '锚 + 山：卡住不动、僵在那里'],
+        36: ['十字架 + 市场：这份工作是负重、不得不做', '十字架 + 床：亲密里有牺牲和承担', '十字架 + 心：为爱受苦'],
+        37: ['灵体 + 床：梦里或灵性层面的亲密', '灵体 + 心：说不清的牵绊', '灵体 + 月亮：直觉与灵性叠加'],
+        38: ['香炉 + 床：清理后的放松、卸下负担', '香炉 + 市场：整顿工作环境', '香炉 + 心：把一段感情从生活里清出去'],
+        39: ['床 + 市场：舒服但没挑战的工作', '床 + 心 + 戒指：同居或婚姻的绑定', '床 + 十字架：既安逸又被折磨'],
+        40: ['市场 + 心：把感情当成经营，或工作里有心动', '市场 + 书：需要先学本事才能上场', '市场 + 锚：长期稳定的职业']
+    };
+    /* 三张连读 · 位置提示：同一张牌落在左 / 中 / 右，读法不同 */
+    var LENO_POS = {
+        1:  '骑士在左＝起因是一则消息；在中＝核心就是「有动静来了」；在右＝接下来会有主动联络。',
+        2:  '四叶草在左＝开头有点运气；在中＝事情本身是轻的、别指望它扛大局；在右＝收尾有个小惊喜。',
+        3:  '船在左＝起因与距离、离开有关；在中＝核心是移动或异地；在右＝接下来会走、会换地方。',
+        4:  '房屋在左＝起因在家庭或住所；在中＝核心是「安顿」；在右＝走向稳定、回归家庭。',
+        5:  '树在左＝根源很久远、慢慢积累的；在中＝核心是健康或长期性；在右＝要拖很久才有结果。',
+        6:  '乌云在左＝起因不清楚；在中＝核心就是「看不清」；在右＝未来仍有变数，别急着定。',
+        7:  '蛇在左＝起因里有绕路或第三方；在中＝核心是复杂、需要周旋；在右＝后面还有弯要绕。',
+        8:  '棺材在左＝起因是一次结束；在中＝核心是「收尾」；在右＝最终会告一段落。',
+        9:  '花束在左＝起因是一份善意或邀约；在中＝核心是被善待、有惊喜；在右＝收尾是愉快的。',
+        10: '镰刀在左＝起因是一次突然的切断；在中＝核心是「当机立断」；在右＝会突然结束，要有准备。',
+        11: '鞭子在左＝起因是反复的争执；在中＝核心是拉扯与消耗；在右＝还会再吵，不是一次了结。',
+        12: '鸟儿在左＝起因是一场对话；在中＝核心在沟通；在右＝接下来会有交谈或消息往来。',
+        13: '孩童在左＝起因很新、很小；在中＝核心是「刚开始」；在右＝会有新的、小的进展。',
+        14: '狐狸在左＝起因里有算计或自保；在中＝核心是要动脑、别太实诚；在右＝后面仍需提防。',
+        15: '熊在左＝起因与资源、权威有关；在中＝核心是「有分量的一方」；在右＝结果由强势的一方决定。',
+        16: '星星在左＝起因是一个愿望或方向；在中＝核心是希望与指引；在右＝长期向好，但慢。',
+        17: '鹳鸟在左＝起因是一次变动；在中＝核心是「在换」；在右＝接下来会进入新阶段。',
+        18: '狗在左＝起因与朋友、熟人有关；在中＝核心是可靠与陪伴；在右＝会有支持者在。',
+        19: '高塔在左＝起因与机构、规则有关；在中＝核心是距离感与边界；在右＝要走正式渠道。',
+        20: '花园在左＝起因在人群或公开场合；在中＝核心是社交与曝光；在右＝事情会走向公开。',
+        21: '山在左＝起因是挡路的现实；在中＝核心就是阻碍；在右＝后面还有硬仗，别指望快。',
+        22: '十字路口在左＝起因是一次分岔；在中＝核心是「要选」；在右＝接下来面临选择。',
+        23: '老鼠在左＝起因是缓慢的损耗；在中＝核心在被消耗；在右＝不处理会持续流失。',
+        24: '心在左＝起因是感情；在中＝核心就是爱与真心；在右＝走向情感层面的结果。',
+        25: '指环在左＝起因是一份约定；在中＝核心是承诺与绑定；在右＝会走向确定、正式。',
+        26: '书在左＝起因是未知、还没摊开；在中＝核心是秘密或学问；在右＝需要先搞清楚再说。',
+        27: '信件在左＝起因是一则文字消息；在中＝核心在沟通内容；在右＝会有书面的结果。',
+        28: '男士在左＝起因与这个男人有关；在中＝他是核心人物；在右＝他会主动。',
+        29: '女士在左＝起因与这个女人有关；在中＝她是核心人物；在右＝她会主动。',
+        30: '百合在左＝起因与成熟、长辈或旧有关系；在中＝核心是安宁与长久；在右＝慢慢沉淀。',
+        31: '太阳在左＝起因是明朗的事实；在中＝核心是成功与被看见；在右＝结果向好，可放心。',
+        32: '月亮在左＝起因与名声、感受有关；在中＝核心是情绪与直觉；在右＝靠感受走，别只看事实。',
+        33: '钥匙在左＝起因已经找到解法；在中＝核心是「有解」；在右＝最终会被解开。',
+        34: '鱼在左＝起因与钱、资源有关；在中＝核心是财务与流动；在右＝会有金钱上的结果。',
+        35: '锚在左＝起因是长期稳定的事；在中＝核心是「不动」；在右＝会长期维持现状。',
+        36: '十字架在左＝起因是必须背负的；在中＝核心是课题与承担；在右＝不是轻松收场。',
+        37: '灵体在左＝起因在无形层面；在中＝核心是业力与直觉；在右＝事情还没落到实际。',
+        38: '香炉在左＝起因是一次清理；在中＝核心是「归零」；在右＝会先清后立。',
+        39: '床在左＝起因与亲密、休息有关；在中＝核心是私密与舒适；在右＝走向身体或休息层面。',
+        40: '市场在左＝起因在工作与交易；在中＝核心是「做事、换来」；在右＝结果落在实务层面。'
+    };
+
+    window.LENO_CB2 = LENO_CB2; window.LENO_POS = LENO_POS;
+
+    /* 渲染：组合实战句 + 三张连读位置提示 */
+    window.lenoCb2Html = function (num) {
+        try {
+            var k = String(num), a = LENO_CB2[k];
+            if (!a || !a.length) return '';
+            var h = '<div class="cr-detail-block"><div class="cr-detail-bhead"><i class="fas fa-comments"></i>组合实战句</div><div class="cr-detail-btext cb-list">';
+            for (var i = 0; i < a.length; i++) h += '<div class="cb-item">' + mjEsc(a[i]) + '</div>';
+            h += '</div></div>';
+            return h;
+        } catch (e) { return ''; }
+    };
+    window.lenoReadHtml = function (num) {
+        try {
+            var k = String(num), t = LENO_POS[k];
+            if (!t) return '';
+            var h = '<div class="cr-detail-block"><div class="cr-detail-bhead"><i class="fas fa-ellipsis-h"></i>三张连读 · 位置提示</div><div class="cr-detail-btext">';
+            h += '<div class="kw-row"><span class="kw-lb">左 / 中 / 右</span><span class="kw-val">' + mjEsc(t) + '</span></div>';
+            h += '<div class="kw-note">雷诺曼三张不要硬套「过去现在未来」。更常用的读法是：左边修饰中间，中间是核心，右边补方向。三张共同组成一个事件，强行拆成时间线反而把信息打散。</div>';
+            h += '</div></div>';
+            return h;
+        } catch (e) { return ''; }
+    };
     /* Rana 扩充四牌（37–40）：官方定位、虚牌属性、36 张替代方案 */
     var LENO_X4 = {
         37: { official: 'Rana 官方：the unseen, intuition, synchronicity；也可指实体（guids、entities）。分流走「业力／灵性／隐藏因果／无形阻碍」，不再和云、十字架混淆',
@@ -74863,6 +75611,1091 @@ window.IM_DICT = {
     window.MJ_LENO = MJ_LENO;
 
 })();
+</script>
+
+<style>
+.mp-wrap{position:fixed;left:8px;top:62px;width:180px;max-height:calc(100vh - 92px);overflow:hidden auto;
+background:rgba(255,255,255,.74);-webkit-backdrop-filter:blur(18px) saturate(1.6);backdrop-filter:blur(18px) saturate(1.6);
+border:1px solid rgba(255,255,255,.9);border-radius:16px;padding:9px;z-index:12000;display:none;
+box-shadow:0 12px 34px rgba(60,45,90,.18),inset 0 1px 0 rgba(255,255,255,.85);color:#3a3350}
+.mp-wrap.on{display:block}
+.mp-head{display:flex;gap:8px;align-items:center;padding:2px 2px 8px;border-bottom:1px solid rgba(90,80,120,.14);margin-bottom:7px}
+.mp-av{width:38px;height:38px;flex:0 0 38px;border-radius:50%;overflow:hidden;background:rgba(140,125,185,.14);
+display:flex;align-items:center;justify-content:center;color:#8a7fb5;font-size:16px}
+.mp-av img{width:100%;height:100%;object-fit:cover}
+.mp-head-txt{min-width:0;flex:1}
+.mp-dyn{font-size:12px;color:#2e2842;font-weight:800;line-height:1.3;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mp-place{font-size:10px;color:#7a7099;margin-top:2px}
+.mp-close{background:none;border:0;color:#8a7fb5;font-size:13px;cursor:pointer;padding:2px}
+.mp-list{display:flex;flex-direction:column;gap:3px}
+.mp-row{display:flex;align-items:center;gap:7px;padding:5px 6px;border-radius:10px;cursor:pointer;
+background:rgba(140,125,185,.07);border:1px solid transparent;transition:.15s}
+.mp-row.main{background:linear-gradient(90deg,rgba(196,127,34,.42),rgba(196,127,34,.14));border-color:rgba(196,127,34,.6)}
+.mp-row.act{background:linear-gradient(90deg,rgba(217,144,58,.2),rgba(217,144,58,.04));border-color:rgba(217,144,58,.34)}
+.mp-row:hover{background:rgba(140,125,185,.16)}
+.mp-row.main:hover{background:linear-gradient(90deg,rgba(196,127,34,.5),rgba(196,127,34,.2))}
+.mp-row.sel{outline:2px solid rgba(196,127,34,.55);outline-offset:-1px}
+.mp-row.main .mp-num{color:#a4661a}
+.mp-row.act .mp-num{color:#a8823f}
+/* 底部：本轮未触发的情绪 —— 无数值、无事件 */
+.mp-sep{font-size:9px;color:#9a92b4;letter-spacing:.5px;padding:7px 6px 3px;
+border-top:1px dashed rgba(120,110,150,.3);margin-top:5px;text-align:center}
+.mp-row.idle{opacity:.62;cursor:default;background:transparent;border-color:transparent}
+.mp-row.idle:hover{background:rgba(140,125,185,.09)}
+.mp-ring-off{position:absolute;inset:3px;border-radius:50%;border:1.5px dashed rgba(130,120,160,.42)}
+.mp-idle{font-size:10px;color:#b3abc8;flex:0 0 auto}
+.mp-emo-box{position:relative;width:30px;height:30px;flex:0 0 30px;display:flex;align-items:center;justify-content:center}
+.mp-ring{position:absolute;inset:0;width:30px;height:30px;transform:rotate(-90deg)}
+.mp-ring-bg{fill:none;stroke:rgba(90,80,120,.16);stroke-width:3}
+.mp-ring-fg{fill:none;stroke-width:3;stroke-linecap:round;transition:stroke-dashoffset .9s linear}
+.mp-emo{position:relative;font-size:14px;line-height:1}
+.mp-nm{font-size:12px;color:#332c48;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mp-row.main .mp-nm{font-weight:800;color:#241f36}
+.mp-num{font-size:10px;color:#7a7099;font-variant-numeric:tabular-nums}
+.mp-dot{width:5px;height:5px;border-radius:50%;background:#d9903a;flex:0 0 5px}
+.mp-foot{margin-top:8px;padding-top:6px;border-top:1px solid rgba(90,80,120,.12);font-size:9px;color:#8f86ab;text-align:center;line-height:1.5}
+/* 事件面板：在情绪列表右侧弹出 */
+.mp-evp{display:none;position:fixed;top:62px;width:200px;z-index:12010;overflow:hidden auto}
+.mp-evp.on{display:block;animation:mpFade .16s ease}
+@keyframes mpFade{from{opacity:0;transform:translateX(-6px)}to{opacity:1;transform:none}}
+.mp-evp-in{background:rgba(255,255,255,.86);-webkit-backdrop-filter:blur(18px) saturate(1.6);backdrop-filter:blur(18px) saturate(1.6);
+border:1px solid rgba(255,255,255,.92);border-radius:14px;padding:9px;box-shadow:0 10px 28px rgba(60,45,90,.16)}
+.mp-evp-top{display:flex;align-items:center;gap:6px;margin-bottom:7px;padding-bottom:6px;border-bottom:1px solid rgba(90,80,120,.12)}
+.mp-evp-emo{font-size:16px}
+.mp-evp-name{font-size:12px;font-weight:800;color:#241f36;flex:1}
+.mp-evp-x{background:none;border:0;color:#8a7fb5;font-size:12px;cursor:pointer;padding:2px}
+.mp-evp-list{display:flex;flex-direction:column;gap:4px}
+.mp-evp-item{display:flex;align-items:baseline;gap:6px;background:rgba(217,144,58,.1);
+border:1px solid rgba(217,144,58,.22);border-radius:9px;padding:5px 7px}
+.mp-evp-t{font-size:11.5px;color:#3a3350;flex:1;line-height:1.45}
+.mp-evp-v{font-size:11.5px;font-weight:800;color:#c47f22;flex:0 0 auto}
+.mp-evp-c{font-size:9.5px;color:#8a7fb5;flex:0 0 auto;font-variant-numeric:tabular-nums}
+.mp-evp-none{font-size:11px;color:#8a7fb5;padding:4px 0}
+.mp-evp-bar{height:3px;background:rgba(90,80,120,.14);border-radius:2px;margin-top:8px;overflow:hidden}
+.mp-evp-bar-in{height:100%;background:#d9903a;border-radius:2px;transition:width .9s linear}
+.mp-evp-meta{font-size:9px;color:#8a7fb5;margin-top:5px}
+/* 我的心情 */
+.mp-mine-mask{position:fixed;inset:0;background:rgba(30,22,50,.35);-webkit-backdrop-filter:blur(3px);backdrop-filter:blur(3px);
+z-index:13000;display:none;align-items:center;justify-content:center;padding:16px}
+.mp-mine-mask.on{display:flex}
+.mp-mine-box{width:100%;max-width:320px;background:rgba(255,255,255,.82);
+-webkit-backdrop-filter:blur(20px) saturate(1.6);backdrop-filter:blur(20px) saturate(1.6);
+border:1px solid rgba(255,255,255,.92);border-radius:18px;padding:15px;
+box-shadow:0 14px 40px rgba(60,45,90,.22);color:#3a3350}
+.mp-mine-head{display:flex;align-items:center;gap:8px}
+.mp-mine-ti{font-size:15px;font-weight:800;color:#241f36;flex:1}
+.mp-mine-sub{font-size:11px;color:#7a7099;margin:4px 0 12px}
+.mp-mine-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.mp-mine-cell{display:flex;flex-direction:column;align-items:center;gap:5px;padding:10px 4px;
+background:rgba(140,125,185,.1);border:1px solid rgba(255,255,255,.7);border-radius:13px;
+cursor:pointer;font:inherit;color:#3a3350;font-size:10px;transition:.15s;text-align:center}
+.mp-mine-cell:hover{background:rgba(140,125,185,.2)}
+.mp-mine-cell.on{background:rgba(217,144,58,.24);border-color:rgba(217,144,58,.55);color:#241f36;font-weight:800}
+.mp-mine-cell.locked{cursor:default;opacity:.45}
+.mp-mine-cell.locked.on{opacity:1}
+.mp-mine-emo{font-size:22px}
+.mp-mine-foot{margin-top:12px;text-align:center}
+.mp-mine-tip{font-size:10px;color:#8f86ab}
+.mp-mine-lock{font-size:10px;color:#c47f22;font-weight:700}
+@media (max-width:360px){
+ .mp-wrap{width:148px;left:6px}
+ .mp-mine-grid{gap:6px}
+}
+</style>
+<script>
+/* =========================================================
+ *  情绪面板 · 内容库
+ *  事件格式：刚刚做了什么（起因） → 产生某个情绪（结果）
+ * ========================================================= */
+var MP_MOODS = [
+    { k: 'leisure', n: '悠闲', e: '😌', lo: 40, hi: 80 },
+    { k: 'miss', n: '想念', e: '🥺', lo: 50, hi: 90 },
+    { k: 'sleepy', n: '困倦', e: '😪', lo: 20, hi: 60 },
+    { k: 'tsun', n: '嘴硬', e: '😤', lo: 35, hi: 75 },
+    { k: 'calm', n: '安心', e: '😊', lo: 55, hi: 90 },
+    { k: 'happy', n: '开心', e: '😄', lo: 60, hi: 95 },
+    { k: 'expect', n: '期待', e: '✨', lo: 50, hi: 90 },
+    { k: 'gloomy', n: '郁闷', e: '😔', lo: 15, hi: 55 },
+    { k: 'bliss', n: '幸福', e: '🥰', lo: 70, hi: 100 },
+    { k: 'confid', n: '自信', e: '😎', lo: 55, hi: 95 },
+    { k: 'crush', n: '心动', e: '💗', lo: 65, hi: 100 },
+    { k: 'worry', n: '担忧', e: '😟', lo: 25, hi: 65 },
+    { k: 'angry', n: '气恼', e: '😠', lo: 30, hi: 75 },
+    { k: 'think', n: '思考', e: '🧐', lo: 45, hi: 85 },
+    { k: 'tired', n: '疲惫', e: '😮‍💨', lo: 20, hi: 60 }
+];
+var MP_MOOD_MAP = {}; MP_MOODS.forEach(function (m) { MP_MOOD_MAP[m.k] = m; });
+
+/* 书籍：恋与深空五位用官方书单（叠纸×新华网世界读书日推荐），其余按人设配 */
+var MP_BOOKS = {
+    '沈星回': ['《万物原理》', '《不存在的骑士》', '《我们的爱情长成星辰》', '《抓娃娃从入门到精通》'],
+    '黎深': ['《打开一颗心》', '《蛇杖的传人》', '《坐在你身边看云》'],
+    '祁煜': ['《画家之眼》', '《格兰特船长的儿女》', '《克劳德·莫奈画集》'],
+    '秦彻': ['《S.忒修斯之船》', '《基督山伯爵》', '《一只猫的存在主义思考》'],
+    '夏以昼': ['《夜航》', '《在云端：飞行旅途中的科学》', '《理智与情感》'],
+    '顾时夜': ['今天的财经报纸', '一份季度财报', '《商战三十年》'],
+    '易遇': ['一本医学期刊', '《临床诊断学》', '手边那本旧笔记'],
+    '柏源': ['一本新菜谱', '《家常菜大全》', '手写的配料笔记'],
+    '夏萧因': ['一本乐谱', '诗集', '《木雕技法》'],
+    _gen: ['《小王子》', '《查拉图斯特拉如是说》', '《瓦尔登湖》', '《沉思录》', '《局外人》',
+        '《飞鸟集》', '《雪国》', '《老人与海》', '《傲慢与偏见》', '《百年孤独》', '《时间简史》', '《月亮与六便士》']
+};
+/* 电影：恋与深空「一幕一生」电影卡官方对应 */
+var MP_FILMS = {
+    '沈星回': '《罗密欧与朱丽叶》', '黎深': '《傲慢与偏见》', '祁煜': '《泰坦尼克号》',
+    '秦彻': '《卡萨布兰卡》', '夏以昼': '《飞屋环游记》'
+};
+var MP_FILMS_GEN = ['一部老电影', '一部刚上新的片', '一部评分很高的剧', '一部看了开头就知道结局的剧', '一部结局没拍完的剧'];
+
+/* 事件库：[起因文本, 数值区间] —— 每条挂在一个情绪下 */
+var MP_EV = {
+    leisure: {
+        _gen: ['时间好像变慢了', '好天气一身轻', '泡了杯茶没动', '坐在窗边发了会儿呆',
+            '手头的事告一段落', '刚睡了个午觉', '刚洗完澡', '把手机扣在了桌上'],
+        '沈星回': ['浮标没动也不急', '字写到一半停了笔', '刚晒了会儿太阳', '在花海躺了一会儿'],
+        '黎深': ['白大褂刚挂起来', '难得的一整天假', '办公室的薄荷浇了水'],
+        '祁煜': ['泡澡水刚好', '在沙滩上坐了一下午', '骑车骑到一半停了'],
+        '秦彻': ['唱片转到 B 面', '在阴凉处待着', '古典乐放到第三首'],
+        '夏以昼': ['苹果削好了没吃', '汤还在火上', '围巾织到一半'],
+        '顾时夜': ['手表刚上过弦', '看完今天的报纸'],
+        '易遇': ['值完夜班，天刚亮'],
+        '柏源': ['在厨房等汤滚'],
+        '夏萧因': ['音响开着放空', '木娃娃雕了一半']
+    },
+    happy: {
+        _gen: ['刚刚和你一起吃饭', '刚收到你的消息', '事情比预想顺利', '刚听到一个好消息',
+            '刚吃到了想吃的', '刚被人夸了一句', '刚看到你发的自拍'],
+        '沈星回': ['酸奶油青瓜三明治做成了', '钓上来一条不小的', '窗台那只小鸟又来了'],
+        '黎深': ['手术很成功', '马卡龙吃完了', '刚跑了五公里'],
+        '祁煜': ['颜料调到了想要的颜色', '画卖了个好价', '口琴引来一群海鸥'],
+        '秦彻': ['刚赢了一局', '新到的黑胶很满意', '梅菲斯特没闯祸'],
+        '夏以昼': ['红烧鸡翅炖上了', '刚落地，平安', '又买到了两份'],
+        '顾时夜': ['刚签下一份合同'],
+        '易遇': ['病人情况稳定了'],
+        '柏源': ['新菜式试成功了'],
+        '夏萧因': ['一段曲子写顺了']
+    },
+    expect: {
+        _gen: ['在等你回复', '刚约好了见面', '时间过得有点慢', '刚定下一件事', '在看手机'],
+        '沈星回': ['看了眼日历', '刚把钓鱼的装备理好'],
+        '黎深': ['排到下个月的假期了'],
+        '祁煜': ['画布刚绷好', '刚订了去采风的票'],
+        '秦彻': ['在等一个消息', '拳套刚戴上'],
+        '夏以昼': ['伞包刚收好', '刚排到休假'],
+        '顾时夜': ['在等一通电话'],
+        '易遇': ['在等你下班'],
+        '柏源': ['在等你来吃饭'],
+        '夏萧因': ['在等你推门进来']
+    },
+    gloomy: {
+        _gen: ['刚刚看了一部电视剧', '刚刚天气转阴了', '有话没说完', '刚被一件小事绊住',
+            '刚翻到一段旧聊天记录', '消息发出去没回音'],
+        '沈星回': ['又迷路了', '花海那边的天阴了'],
+        '黎深': ['被塞了胡萝卜', '连着三天没休息'],
+        '祁煜': ['画到一半推翻了', '猫又溜进画室了'],
+        '秦彻': ['阳光太晒了', '有人办事不干净'],
+        '夏以昼': ['任务临时取消', '苹果有点酸'],
+        '顾时夜': ['一笔账没对上'],
+        '易遇': ['翻到素描本的某一页'],
+        '柏源': ['菜咸了'],
+        '夏萧因': ['曲子卡在副歌']
+    },
+    bliss: {
+        _gen: ['刚刚和你一起散步', '你刚发的照片看了很久', '刚想起你上次说的话',
+            '刚和你通完话', '就这么待着'],
+        '沈星回': ['和你一起看过日出了', '你靠着他睡着了'],
+        '黎深': ['你按时吃饭了', '你说今天没熬夜'],
+        '祁煜': ['你夸了他的画', '一起在白沙湾看了落日'],
+        '秦彻': ['你没躲开他的视线', '你说会等他'],
+        '夏以昼': ['你叫他哥哥', '你把苹果吃完了'],
+        '顾时夜': ['你说会回来'],
+        '易遇': ['你叫了他师父'],
+        '柏源': ['你把菜吃光了'],
+        '夏萧因': ['你说选他']
+    },
+    confid: {
+        _gen: ['刚把手上的事做完了', '心里有数', '刚做完一个决定', '刚解决一个麻烦'],
+        '沈星回': ['剑收得很稳', '这一局没费力气'],
+        '黎深': ['诊断下得很快', '台球赢了'],
+        '祁煜': ['这一笔很确定', '颜色不用再改了'],
+        '秦彻': ['事情在掌控里', '对手不值一提'],
+        '夏以昼': ['航线算得很准', '训练破纪录了'],
+        '顾时夜': ['谈判赢了'],
+        '易遇': ['方案很完整'],
+        '柏源': ['这一场稳赢'],
+        '夏萧因': ['局势在他手里']
+    },
+    crush: {
+        _gen: ['你刚才那句话看了两遍', '手指停在输入框', '刚看到你发的照片',
+            '想发消息又删掉了', '翻了翻聊天记录'],
+        '沈星回': ['给你留了楼上的灯', '把你的名字念了一遍'],
+        '黎深': ['把你的体检报告看了两遍'],
+        '祁煜': ['画里的人是你', '口琴吹的是给你听的'],
+        '秦彻': ['在看你走过的路', '把你的名字存成了备注'],
+        '夏以昼': ['买了两份，一份给你', '密码还是你的生日'],
+        '顾时夜': ['记住了你的名字怎么写'],
+        '易遇': ['素描本上又多了一页'],
+        '柏源': ['把最好那块留给你'],
+        '夏萧因': ['雕的是你的样子']
+    },
+    worry: {
+        _gen: ['刚听到一个不太好的消息', '有件事还没确认', '想起你上次说不舒服',
+            '看你很久没动静', '天要变了'],
+        '沈星回': ['你去了不该去的地方', '磁场有点不对'],
+        '黎深': ['你又熬夜了', '你没按时吃药'],
+        '祁煜': ['潮汐之日快到了', '你要出海'],
+        '秦彻': ['你身边有生人', '你没带够人手'],
+        '夏以昼': ['你要独自出任务', '天气不适合飞行'],
+        '顾时夜': ['有人盯上你了'],
+        '易遇': ['你的检查结果还没出'],
+        '柏源': ['你又没好好吃饭'],
+        '夏萧因': ['海上有风暴']
+    },
+    angry: {
+        _gen: ['刚有人惹到他', '话说到一半咽回去了', '刚看到一条不顺眼的消息', '忍着没发作'],
+        '沈星回': ['有人挡了你的路', '被吵醒了'],
+        '黎深': ['有人不遵医嘱', '被塞了第二根胡萝卜'],
+        '祁煜': ['有人进了 Mo', '被人催稿'],
+        '秦彻': ['有人动了他的人', '办事的人太蠢'],
+        '夏以昼': ['有人靠你太近', '任务被截胡'],
+        '顾时夜': ['有人越了界'],
+        '易遇': ['有人碰了他的素描本'],
+        '柏源': ['有人抢你碗里的'],
+        '夏萧因': ['有人直呼你的名字']
+    },
+    think: {
+        _gen: ['刚在想一件事', '刚看完一段文字', '盯着一处看了很久', '在心里过了一遍'],
+        '沈星回': ['在看星图', '在想下一个命名'],
+        '黎深': ['在推一个病例', '在想怎么开口'],
+        '祁煜': ['在想这一块颜色', '在想利莫里亚'],
+        '秦彻': ['在算一笔账', '在想下一步棋'],
+        '夏以昼': ['在算一条航线', '在想怎么跟你解释'],
+        '顾时夜': ['在想你的命数'],
+        '易遇': ['在想一个方案'],
+        '柏源': ['在想下一顿做什么'],
+        '夏萧因': ['在解一道题']
+    },
+    miss: {
+        _gen: ['刚翻到一段旧聊天记录', '看到你上次发的照片', '算算有多久没见', '你今天还没发消息',
+            '看到一件你会喜欢的东西', '翻到你以前说的话'],
+        '沈星回': ['给你留的灯还亮着', '看到一颗很亮的星'],
+        '黎深': ['看到你落下的东西'],
+        '祁煜': ['画里又出现了你', '听见海鸥叫'],
+        '秦彻': ['看到你走过的路'],
+        '夏以昼': ['买了你爱吃的水果'],
+        '顾时夜': ['摸了摸那支笔'],
+        '易遇': ['素描本又翻了一页'],
+        '柏源': ['做了你爱吃的菜'],
+        '夏萧因': ['木娃娃刻到了脸']
+    },
+    sleepy: {
+        _gen: ['昨晚没睡好', '刚打了个哈欠', '眼睛快睁不开了', '撑着没睡', '刚睡醒又困了'],
+        '沈星回': ['晒着太阳快睡着了', '伤还没好透，想睡'],
+        '黎深': ['连着值班，困'],
+        '祁煜': ['泡澡泡到快睡着'],
+        '秦彻': ['天亮了该睡了'],
+        '夏以昼': ['刚落地，累'],
+        '顾时夜': ['连开四个会'],
+        '易遇': ['夜班到天亮'],
+        '柏源': ['吃饱了犯困'],
+        '夏萧因': ['一夜没睡']
+    },
+    tsun: {
+        _gen: ['说没事其实有事', '话说到一半拐了弯', '嘴上不承认', '明明在意偏要说不'],
+        '沈星回': ['说随便其实都记得', '说不想其实是想'],
+        '黎深': ['说是医嘱其实是担心'],
+        '祁煜': ['说不关心其实画了一整晚'],
+        '秦彻': ['说无所谓其实都安排好了'],
+        '夏以昼': ['说顺手买的其实是特意'],
+        '顾时夜': ['说是顺便其实是专程'],
+        '易遇': ['说是惯例其实是私心'],
+        '柏源': ['说是做多了其实是留给你的'],
+        '夏萧因': ['说不难过其实哭了']
+    },
+    calm: {
+        _gen: ['知道你没事', '刚确认了一件事', '心里那块石头落了', '你回消息了', '事情有了着落'],
+        '沈星回': ['你平安到家了', '磁场稳定了'],
+        '黎深': ['检查结果没问题'],
+        '祁煜': ['潮汐之日过去了'],
+        '秦彻': ['你身边没有异常'],
+        '夏以昼': ['你落地报了平安'],
+        '顾时夜': ['账目对上了'],
+        '易遇': ['你睡熟了'],
+        '柏源': ['你把饭吃完了'],
+        '夏萧因': ['海面平静了']
+    },
+    tired: {        _gen: ['刚忙完', '刚下夜班', '眼睛有点酸', '刚走了很多路', '撑着呢'],
+        '沈星回': ['刚睡醒又想睡', '伤还没好透'],
+        '黎深': ['连着三台手术', '一个月没休了'],
+        '祁煜': ['闭关三天没出门', '熬夜画完了'],
+        '秦彻': ['刚练完拳', '熬了个通宵'],
+        '夏以昼': ['刚落地', '连飞了两天'],
+        '顾时夜': ['连开了四个会'],
+        '易遇': ['值班到天亮'],
+        '柏源': ['训练了一整天'],
+        '夏萧因': ['一夜没睡']
+    }
+};
+
+/* 顶部动态事件：他此刻在做的事（10–30 分钟刷新） */
+var MP_DYN = {
+    _gen: ['正在睡觉', '正在吃饭', '正在工作', '正在洗澡', '正在听歌', '正在散步',
+        '正在看窗外', '正在收拾房间', '正在泡茶', '正在发呆', '正在看手机', '正在采购'],
+    '沈星回': ['正在喝茶', '正在练字', '正在钓鱼', '正在睡觉', '正在下厨', '正在擦剑',
+        '正在给窗台的小鸟添水', '正在看日出', '正在弹钢琴', '正在下围棋', '正在暗房洗照片'],
+    '黎深': ['正在做手术', '正在看病历', '正在值班', '正在听重金属', '正在跑步',
+        '正在泡可可冲饮', '正在打台球', '正在开会'],
+    '祁煜': ['正在画画', '正在泡澡', '正在磨颜料', '正在吹口琴', '正在挑海鲜',
+        '正在拍照', '正在闭关', '正在躲猫'],
+    '秦彻': ['正在听黑胶', '正在练拳', '正在弹管风琴', '正在处理文件', '正在玩星战游戏',
+        '正在看《动物大世界》', '正在擦唱片', '正在骑马'],
+    '夏以昼': ['正在做饭', '正在织围巾', '正在健身', '正在整理伞包', '正在削苹果',
+        '正在擦飞机模型', '正在做家务', '正在跳伞'],
+    '顾时夜': ['正在看报纸', '正在批文件', '正在缝扣子', '正在射击', '正在戴手表', '正在开会'],
+    '易遇': ['正在写病历', '正在翻素描本', '正在值班', '正在查房', '正在看书'],
+    '柏源': ['正在做饭', '正在找吃的', '正在训练', '正在试味', '正在擦刀'],
+    '夏萧因': ['正在作曲', '正在雕木娃娃', '正在听音响', '正在写曲子', '正在看书']
+};
+/* 想和你一起 —— 低权重穿插 */
+var MP_TOGETHER = ['想和你一起看风景', '想和你一起吃饭', '想和你一起看日出', '想和你一起散步',
+    '想和你一起看雪', '想和你一起逛旧书店', '想和你一起做饭', '想和你一起看海', '想和你一起发呆'];
+
+/* 所在位置 */
+var MP_PLACE = {
+    _gen: ['1F·客厅', '1F·厨房', '1F·阳台', '1F·房间3', '2F·卧室', '2F·书房', '2F·浴室',
+        '临江路·便利店', '花店门口', '公园长椅', '地铁2号线', '旧书店', '天台', '江边'],
+    '沈星回': ['1F·客厅', '2F·书房', '1F·阳台', '花浦区·老街', '白沙湾', '天台', '旧书店', '猎人协会·训练场'],
+    '黎深': ['临空中心医院·值班室', '临空中心医院·办公室', '2F·书房', '1F·客厅', '江边', '医院·天台'],
+    '祁煜': ['Mo Art Studio', 'Mo Art Studio·浴室', '白沙湾', '1F·客厅', '海鲜市场', '画廊'],
+    '秦彻': ['暗点·据点', 'N109区', '2F·卧室', '地下拳场', '1F·客厅', '信号不明'],
+    '夏以昼': ['1F·厨房', 'DAA飞行基地', '远空舰队·舰桥', '2F·卧室', '1F·阳台', '天台'],
+    '顾时夜': ['银非集团·顶层', '洛宁·顾宅', '2F·书房', '1F·客厅'],
+    '易遇': ['市中心医院·诊室', '爱莎医院·诊室', '2F·书房', '1F·客厅'],
+    '柏源': ['1F·厨房', '南洲海军·驻地', '焕新科技·茶水间', '菜市场'],
+    '夏萧因': ['东水寨', '2F·书房', '1F·客厅', '海边']
+};
+
+/* 我的心情九宫格 */
+var MP_MYMOODS = [
+    { k: 'bliss', n: '宇宙最幸福', e: '🥰' },
+    { k: 'happy', n: '心情晴', e: '☀️' },
+    { k: 'gloomy', n: '心碎', e: '💔' },
+    { k: 'worry', n: '压力山大', e: '😫' },
+    { k: 'angry', n: '小发雷霆', e: '💢' },
+    { k: 'tired', n: '灵魂出走中', e: '👻' },
+    { k: 'think', n: '忙到飞起', e: '🌀' },
+    { k: 'crush', n: '想贴贴', e: '🫂' },
+    { k: 'confid', n: '最强猎人', e: '🎯' }
+];
+
+
+/* =========================================================
+ *  情绪面板 · 逻辑与界面
+ *  - 联系人数据互不互通（按 contactId 隔离存储）
+ *  - 情绪 + 事件内容：5–15 分钟刷新
+ *  - 顶部动态事件 + 位置：10–30 分钟刷新
+ *  - 情绪条随倒计时衰减
+ *  - 事件内容出现概率 45%
+ *  - 我的心情：3–6 小时随机，锁定后不可改
+ * ========================================================= */
+(function () {
+    var AP = (typeof window.APP_PREFIX === 'string' && window.APP_PREFIX) ? window.APP_PREFIX : 'CHAT_APP_V3_';
+    var K_PANEL = AP + 'moodPanel_v1';
+    var K_MINE = AP + 'myMood_v1';
+
+    function rnd(a, b) { return a + Math.floor(Math.random() * (b - a + 1)); }
+    function pick(a) { return a[Math.floor(Math.random() * a.length)]; }
+    function load(k, d) { try { var v = JSON.parse(localStorage.getItem(k) || 'null'); return v || d; } catch (e) { return d; } }
+    function save(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} }
+
+    /* 角色识别 */
+    function roleOf(name) {
+        var n = String(name || '');
+        var keys = ['沈星回', '黎深', '祁煜', '秦彻', '夏以昼', '顾时夜', '易遇', '柏源', '夏萧因'];
+        for (var i = 0; i < keys.length; i++) if (n.indexOf(keys[i]) >= 0) return keys[i];
+        return '';
+    }
+    function pool(group, role, moodKey) {
+        var g = group[moodKey] || {};
+        var out = (g._gen || []).slice();
+        if (role && g[role]) out = out.concat(g[role]);
+        return out;
+    }
+    function dynPool(role) {
+        var out = (MP_DYN._gen || []).slice();
+        if (role && MP_DYN[role]) out = out.concat(MP_DYN[role]);
+        return out;
+    }
+    function placePool(role) {
+        var out = (MP_PLACE._gen || []).slice();
+        if (role && MP_PLACE[role]) out = out.concat(MP_PLACE[role]);
+        return out;
+    }
+    function bookPool(role) {
+        if (role && MP_BOOKS[role]) return MP_BOOKS[role].slice();
+        return (MP_BOOKS._gen || []).slice();
+    }
+
+    /* 生成一条事件内容（起因式） */
+    function makeEventText(role, moodKey) {
+        var r = Math.random(), txt;
+        if (r < 0.18) { txt = '刚看完 ' + pick(bookPool(role)); }
+        else if (r < 0.28) { var f = (role && MP_FILMS[role]) ? MP_FILMS[role] : pick(MP_FILMS_GEN); txt = '刚看完 ' + f; }
+        else if (r < 0.34) { txt = pick(MP_TOGETHER); }
+        else { var p = pool(MP_EV, role, moodKey); txt = p.length ? pick(p) : pick(pool(MP_EV, role, 'leisure')); }
+        return txt;
+    }
+    /* 一个情绪可同时触发 1–5 件事件，每件有自己的倒计时 */
+    function makeEvents(role, moodKey, maxMin) {
+        var n = rnd(1, 5);
+        var p = pool(MP_EV, role, moodKey);
+        var used = {}, out = [];
+        for (var i = 0; i < n; i++) {
+            var txt = null;
+            for (var tryN = 0; tryN < 12; tryN++) {
+                var t = makeEventText(role, moodKey);
+                if (!used[t]) { txt = t; break; }
+            }
+            if (!txt) { txt = p.length ? pick(p) : '刚想到你'; }
+            used[txt] = 1;
+            var mins = rnd(1, Math.max(1, maxMin));
+            out.push({ t: txt, v: pick([5, 10, 10, 10, 15, 20]), dur: mins * 60000, until: Date.now() + mins * 60000 });
+        }
+        return out;
+    }
+
+    /* 次情绪逐位判定概率：越往后越难触发，可能一个都没有 */
+    var MP_SUB_P = [0.72, 0.52, 0.36, 0.24, 0.14];
+
+    /* 生成一组情绪：全部 15 个都列出
+       主情绪 1 个（随机抽，置顶）· 次情绪 0–5 个（概率递减，紧随其后）
+       其余沉底：不显示数值、不带事件 */
+    function makeMoods(role) {
+        var mainM = pick(MP_MOODS);
+        var rest = MP_MOODS.filter(function (m) { return m.k !== mainM.k; });
+        /* 洗牌，保证抽取随机 */
+        for (var i = rest.length - 1; i > 0; i--) { var j = Math.floor(Math.random() * (i + 1)); var t = rest[i]; rest[i] = rest[j]; rest[j] = t; }
+        var actKeys = {};
+        for (var s2 = 0; s2 < MP_SUB_P.length && s2 < rest.length; s2++) {
+            if (Math.random() < MP_SUB_P[s2]) actKeys[rest[s2].k] = 1;
+            else break;                       /* 抽不中就不再往后判 */
+        }
+        var dur = rnd(5, 15) * 60 * 1000;
+        var now = Date.now();
+        var maxMin = Math.round(dur / 60000);
+        var list = MP_MOODS.map(function (m) {
+            var isMain = m.k === mainM.k;
+            var isAct = !isMain && !!actKeys[m.k];
+            var val = rnd(m.lo, m.hi);
+            var it = {
+                k: m.k, n: m.n, e: m.e,
+                main: isMain, act: isAct,
+                val: val, max: val,
+                /* 只有主情绪与次情绪才可能有事件；沉底的那批没有 */
+                has: isMain ? true : (isAct ? (Math.random() < 0.45) : false),
+                evs: null,
+                until: now + dur, dur: dur, born: now
+            };
+            if (it.has) it.evs = makeEvents(role, m.k, maxMin);
+            return it;
+        });
+        return { list: list, at: now };
+    }
+
+    function makeDyn(role) {
+        var dur = rnd(10, 30) * 60 * 1000;
+        return { text: pick(dynPool(role)), place: pick(placePool(role)), until: Date.now() + dur, dur: dur };
+    }
+
+    /* 取（或初始化）某联系人的面板数据 */
+    function stateOf(cid, name) {
+        var all = load(K_PANEL, {});
+        var role = roleOf(name);
+        var st = all[cid];
+        var now = Date.now();
+        if (!st) {
+            st = { moods: makeMoods(role), dyn: makeDyn(role), name: name || '' };
+            all[cid] = st;
+        } else {
+            st.name = name || st.name || '';
+            if (!st.moods || !st.moods.list || !st.moods.list.length || !st.moods.at || now >= st.moods.at + Math.max.apply(null, st.moods.list.map(function (x) { return x.dur || 0; }))) {
+                st.moods = makeMoods(role);
+            }
+            if (!st.dyn || !st.dyn.until || now >= st.dyn.until) st.dyn = makeDyn(role);
+        }
+        save(K_PANEL, all);
+        return st;
+    }
+    function writeState(cid, st) { var all = load(K_PANEL, {}); all[cid] = st; save(K_PANEL, all); }
+
+    /* 当前联系人 */
+    function currentContact() {
+        var name = '', cid = '';
+        try {
+            var el = document.getElementById('partner-name');
+            if (el) name = (el.textContent || '').trim();
+        } catch (e) {}
+        try {
+            var cs = window.mcwGetContacts ? (window.mcwGetContacts() || []) : [];
+            for (var i = 0; i < cs.length; i++) {
+                if ((cs[i].name || '').trim() === name) { cid = String(cs[i].id); break; }
+            }
+        } catch (e) {}
+        if (!cid) cid = '@name:' + (name || 'unknown');
+        return { id: cid, name: name || 'TA' };
+    }
+    function avatarOf(cid) {
+        try { return (window.mcwContactAvatarSync ? window.mcwContactAvatarSync(cid) : '') || ''; } catch (e) { return ''; }
+    }
+
+    /* ---------- 界面 ---------- */
+    var wrap = null, mineWrap = null, tick = null, curIdx = -1;
+
+    function ringSvg(pct, color) {
+        var R = 15, C = 2 * Math.PI * R;
+        var off = C * (1 - pct);
+        return '<svg class="mp-ring" viewBox="0 0 36 36">'
+            + '<circle class="mp-ring-bg" cx="18" cy="18" r="' + R + '"></circle>'
+            + '<circle class="mp-ring-fg" cx="18" cy="18" r="' + R + '" stroke="' + color + '"'
+            + ' stroke-dasharray="' + C.toFixed(1) + '" stroke-dashoffset="' + off.toFixed(1) + '"></circle>'
+            + '</svg>';
+    }
+    function fmtLeft(ms) {
+        if (ms < 0) ms = 0;
+        var m = Math.floor(ms / 60000), s = Math.floor((ms % 60000) / 1000);
+        return m + ':' + (s < 10 ? '0' : '') + s;
+    }
+    function esc(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
+
+    function build() {
+        if (wrap) return wrap;
+        wrap = document.createElement('div');
+        wrap.className = 'mp-wrap';
+        wrap.innerHTML = '<div class="mp-head">'
+            + '<div class="mp-av" id="mp-av"><i class="fas fa-user"></i></div>'
+            + '<div class="mp-head-txt"><div class="mp-dyn" id="mp-dyn">—</div>'
+            + '<div class="mp-place" id="mp-place">—</div></div>'
+            + '<button type="button" class="mp-close" id="mp-close" title="收起"><i class="fas fa-times"></i></button>'
+            + '</div><div class="mp-list" id="mp-list"></div>'
+            + '<div class="mp-foot">情绪 5–15 分刷新 · 动态 10–30 分刷新 · 点情绪看事件</div>';
+        document.body.appendChild(wrap);
+        var evp = document.createElement('div');
+        evp.className = 'mp-evp'; evp.id = 'mp-evp';
+        document.body.appendChild(evp);
+        window.addEventListener('resize', function () { if (curIdx >= 0) placeEv(); });
+        wrap.addEventListener('click', function (e) {
+            var t = e.target;
+            if (t.closest && t.closest('#mp-close')) { close(); return; }
+            var row = t.closest ? t.closest('.mp-row') : null;
+            if (row) {
+                if (row.classList.contains('idle')) { hideEv(); return; }
+                showEv(+row.getAttribute('data-idx')); return;
+            }
+            var xb = t.closest ? t.closest('#mp-evp-close') : null;
+            if (xb) { hideEv(); return; }
+        });
+        return wrap;
+    }
+
+    /* 事件面板定位：始终贴在情绪列表右侧，且不超出屏幕 */
+    function placeEv() {
+        var box = document.getElementById('mp-evp');
+        if (!box || !wrap) return;
+        var r = wrap.getBoundingClientRect();
+        var vw = window.innerWidth || document.documentElement.clientWidth || 375;
+        var w = Math.max(138, Math.min(206, vw - r.right - 12));
+        box.style.width = w + 'px';
+        box.style.left = Math.min(r.right + 8, Math.max(6, vw - w - 6)) + 'px';
+        box.style.top = Math.max(6, r.top) + 'px';
+        box.style.maxHeight = 'calc(100vh - ' + (Math.max(6, r.top) + 8) + 'px)';
+    }
+
+    /* 事件面板：显示在情绪列表右侧 */
+    function showEv(idx) {
+        var st = lastState; if (!st) return;
+        var it = st.moods.list[idx]; if (!it) return;
+        curIdx = idx;
+        var box = document.getElementById('mp-evp'); if (!box) return;
+        var now = Date.now();
+        var pct = Math.max(0, Math.min(1, (it.until - now) / it.dur));
+        var h = '<div class="mp-evp-in">'
+            + '<div class="mp-evp-top"><span class="mp-evp-emo">' + it.e + '</span>'
+            + '<span class="mp-evp-name">' + esc(it.n) + '</span>'
+            + '<button type="button" class="mp-evp-x" id="mp-evp-close"><i class="fas fa-times"></i></button></div>';
+        if (it.has && it.evs && it.evs.length) {
+            h += '<div class="mp-evp-list">';
+            it.evs.forEach(function (ev) {
+                var left = ev.until - now;
+                h += '<div class="mp-evp-item">'
+                    + '<span class="mp-evp-t">' + esc(ev.t) + '</span>'
+                    + '<span class="mp-evp-v">+' + ev.v + '</span>'
+                    + '<span class="mp-evp-c" data-evc="' + esc(ev.t) + '">' + Math.max(0, Math.ceil(left / 60000)) + '分</span>'
+                    + '</div>';
+            });
+            h += '</div>';
+        } else {
+            h += '<div class="mp-evp-none">此刻没有特别的缘由</div>';
+        }
+        h += '<div class="mp-evp-bar"><div class="mp-evp-bar-in" id="mp-evp-bar-in" style="width:' + (pct * 100).toFixed(1) + '%"></div></div>'
+            + '<div class="mp-evp-meta" id="mp-evp-meta">强度 ' + Math.round(it.val * pct) + ' / ' + it.max + ' · 剩余 ' + fmtLeft(it.until - now) + '</div>'
+            + '</div>';
+        box.innerHTML = h;
+        box.classList.add('on');
+        placeEv();
+        wrap.querySelectorAll('.mp-row').forEach(function (r, i) { r.classList.toggle('sel', i === idx); });
+    }
+    function hideEv() {
+        var box = document.getElementById('mp-evp');
+        if (box) { box.classList.remove('on'); box.innerHTML = ''; }
+        if (wrap) wrap.querySelectorAll('.mp-row').forEach(function (r) { r.classList.remove('sel'); });
+        curIdx = -1;
+    }
+
+    var lastState = null, lastCid = null;
+    function render() {
+        var c = currentContact();
+        var st = stateOf(c.id, c.name);
+        lastState = st; lastCid = c.id;
+        var wrapEl = build();
+        var av = avatarOf(c.id);
+        var avEl = document.getElementById('mp-av');
+        if (avEl) avEl.innerHTML = av ? '<img src="' + esc(av) + '" alt="">' : '<i class="fas fa-user"></i>';
+        var dEl = document.getElementById('mp-dyn'); if (dEl) dEl.textContent = st.dyn.text;
+        var pEl = document.getElementById('mp-place'); if (pEl) pEl.textContent = st.dyn.place;
+
+        var now = Date.now(), html = '';
+        /* 前排 = 随机抽中的主情绪 + 次情绪（主在最上，次随其后）
+           底部 = 本轮没被抽到的情绪，无数值、无事件 */
+        var front = [], back = [];
+        st.moods.list.forEach(function (it, i) {
+            if (it.main) front.unshift({ i: i, r: 0 });
+            else if (it.act) front.push({ i: i, r: 1 });
+            else back.push({ i: i, r: 2 });
+        });
+        front.sort(function (a, b) { return a.r - b.r || a.i - b.i; });
+        var order = front.concat(back);
+        var firstBack = true;
+        order.forEach(function (o) {
+            var it = st.moods.list[o.i], i = o.i;
+            var idle = !it.main && !it.act;
+            if (idle && firstBack) {
+                firstBack = false;
+                html += '<div class="mp-sep">本轮未触发</div>';
+            }
+            if (idle) {
+                html += '<div class="mp-row idle" data-idx="' + i + '">'
+                    + '<span class="mp-emo-box"><span class="mp-ring-off"></span><span class="mp-emo">' + it.e + '</span></span>'
+                    + '<span class="mp-nm">' + esc(it.n) + '</span>'
+                    + '<span class="mp-idle">—</span>'
+                    + '</div>';
+                return;
+            }
+            var pct = Math.max(0, Math.min(1, (it.until - now) / it.dur));
+            var cur = Math.round(it.val * pct);
+            var color = it.main ? '#c47f22' : '#d9903a';
+            var cls = it.main ? ' main' : ' act';
+            html += '<div class="mp-row' + cls + '" data-idx="' + i + '">'
+                + '<span class="mp-emo-box">' + ringSvg(pct, color) + '<span class="mp-emo">' + it.e + '</span></span>'
+                + '<span class="mp-nm">' + esc(it.n) + '</span>'
+                + '<span class="mp-num">' + cur + '</span>'
+                + (it.has && it.evs && it.evs.length ? '<span class="mp-dot"></span>' : '')
+                + '</div>';
+        });
+        var lEl = document.getElementById('mp-list'); if (lEl) lEl.innerHTML = html;
+        var ci = st.moods.list[curIdx];
+        if (curIdx >= 0 && ci && !(!ci.main && !ci.act)) showEv(curIdx); else hideEv();
+    }
+
+    function tickFn() {
+        if (!wrap || !wrap.classList.contains('on')) return;
+        var c = currentContact();
+        var st = stateOf(c.id, c.name);
+        var now = Date.now();
+        var maxUntil = 0; st.moods.list.forEach(function (x) { if (x.until > maxUntil) maxUntil = x.until; });
+        if ((maxUntil && now >= maxUntil) || now >= st.dyn.until || c.id !== lastCid) { render(); return; }
+        wrap.querySelectorAll('.mp-row').forEach(function (row) {
+            var i = +row.getAttribute('data-idx');
+            var it = st.moods.list[i]; if (!it) return;
+            var pct = Math.max(0, Math.min(1, (it.until - now) / it.dur));
+            if (it.main || it.act) {
+                var fg = row.querySelector('.mp-ring-fg');
+                if (fg) fg.setAttribute('stroke-dashoffset', (2 * Math.PI * 15 * (1 - pct)).toFixed(1));
+                var n = row.querySelector('.mp-num'); if (n) n.textContent = Math.round(it.val * pct);
+            }
+        });
+        if (curIdx >= 0) {
+            var it2 = st.moods.list[curIdx]; if (!it2) { hideEv(); return; }
+            var pct2 = Math.max(0, Math.min(1, (it2.until - now) / it2.dur));
+            var bar = document.getElementById('mp-evp-bar-in');
+            var meta = document.getElementById('mp-evp-meta');
+            if (bar) bar.style.width = (pct2 * 100).toFixed(1) + '%';
+            if (meta) meta.textContent = '强度 ' + Math.round(it2.val * pct2) + ' / ' + it2.max + ' · 剩余 ' + fmtLeft(it2.until - now);
+            wrap.querySelectorAll('[data-evc]').forEach(function (el) {
+                var key = el.getAttribute('data-evc'), ev = null;
+                (it2.evs || []).forEach(function (x) { if (x.t === key) ev = x; });
+                if (ev) el.textContent = Math.max(0, Math.ceil((ev.until - now) / 60000)) + '分';
+            });
+        }
+    }
+
+    function open() {
+        var w = build();
+        render();
+        w.classList.add('on');
+        if (!tick) tick = setInterval(tickFn, 1000);
+    }
+    function close() { if (wrap) { wrap.classList.remove('on'); hideEv(); } if (tick) { clearInterval(tick); tick = null; } }
+    function toggle() { if (wrap && wrap.classList.contains('on')) close(); else open(); }
+
+    /* ---------- 我的心情 ---------- */
+    function myState() { return load(K_MINE, null); }
+    function buildMine() {
+        if (mineWrap) return mineWrap;
+        mineWrap = document.createElement('div');
+        mineWrap.className = 'mp-mine-mask';
+        mineWrap.innerHTML = '<div class="mp-mine-box">'
+            + '<div class="mp-mine-head"><span class="mp-mine-ti">我的心情</span>'
+            + '<button type="button" class="mp-evp-x" id="mp-mine-close"><i class="fas fa-times"></i></button></div>'
+            + '<div class="mp-mine-sub">你的任何心绪，都是他的头等大事</div>'
+            + '<div class="mp-mine-grid" id="mp-mine-grid"></div>'
+            + '<div class="mp-mine-foot" id="mp-mine-foot"></div></div>';
+        document.body.appendChild(mineWrap);
+        mineWrap.addEventListener('click', function (e) {
+            var t = e.target;
+            if (t === mineWrap) { closeMine(); return; }
+            if (t.closest && t.closest('#mp-mine-close')) { closeMine(); return; }
+            var b = t.closest ? t.closest('[data-mymood]') : null;
+            if (b && !b.classList.contains('locked')) setMine(b.getAttribute('data-mymood'));
+        });
+        return mineWrap;
+    }
+    function setMine(k) {
+        var dur = rnd(3, 6) * 3600 * 1000;
+        save(K_MINE, { k: k, until: Date.now() + dur, dur: dur });
+        renderMine();
+    }
+    function renderMine() {
+        var w = buildMine();
+        var st = myState(), now = Date.now();
+        var grid = document.getElementById('mp-mine-grid');
+        var foot = document.getElementById('mp-mine-foot');
+        if (st && now < st.until) {
+            var left = st.until - now;
+            var h = Math.floor(left / 3600000), m = Math.floor((left % 3600000) / 60000);
+            var cur = null; MP_MYMOODS.forEach(function (x) { if (x.k === st.k) cur = x; });
+            if (grid) grid.innerHTML = MP_MYMOODS.map(function (x) {
+                return '<div class="mp-mine-cell' + (x.k === st.k ? ' on' : '') + ' locked">'
+                    + '<span class="mp-mine-emo">' + x.e + '</span><span>' + esc(x.n) + '</span></div>';
+            }).join('');
+            if (foot) foot.innerHTML = '<span class="mp-mine-lock"><i class="fas fa-lock"></i> 已设为「' + esc(cur ? cur.n : '') + '」，' + h + ' 小时 ' + m + ' 分后可重新设置</span>';
+        } else {
+            if (grid) grid.innerHTML = MP_MYMOODS.map(function (x) {
+                return '<button type="button" class="mp-mine-cell" data-mymood="' + x.k + '">'
+                    + '<span class="mp-mine-emo">' + x.e + '</span><span>' + esc(x.n) + '</span></button>';
+            }).join('');
+            if (foot) foot.innerHTML = '<span class="mp-mine-tip">设置后 3–6 小时内不可更改</span>';
+        }
+    }
+    function openMine() { var w = buildMine(); renderMine(); w.classList.add('on'); }
+    function closeMine() { if (mineWrap) mineWrap.classList.remove('on'); }
+
+    /* ---------- 入口：聊天页顶部右侧「⋯」三点菜单，排在最前 ---------- */
+    function ensureMenu() {
+        var menu = document.getElementById('chat-more-menu');
+        if (!menu) { setTimeout(ensureMenu, 400); return; }
+        if (document.getElementById('mp-menu-mood')) return;
+        var b1 = document.createElement('button');
+        b1.id = 'mp-menu-mood';
+        b1.innerHTML = '<i class="fas fa-heart-circle-bolt"></i> 情绪面板';
+        b1.addEventListener('click', function (e) {
+            e.stopPropagation();
+            try { if (typeof window.closeChatMoreMenu === 'function') window.closeChatMoreMenu(); } catch (err) {}
+            var m = document.getElementById('chat-more-menu'); if (m) m.style.display = 'none';
+            setTimeout(open, 60);
+        });
+        var b2 = document.createElement('button');
+        b2.id = 'mp-menu-mine';
+        b2.innerHTML = '<i class="fas fa-face-smile"></i> 我的心情';
+        b2.addEventListener('click', function (e) {
+            e.stopPropagation();
+            try { if (typeof window.closeChatMoreMenu === 'function') window.closeChatMoreMenu(); } catch (err) {}
+            var m = document.getElementById('chat-more-menu'); if (m) m.style.display = 'none';
+            setTimeout(openMine, 60);
+        });
+        menu.insertBefore(b2, menu.firstChild);
+        menu.insertBefore(b1, menu.firstChild);
+        // 旧的两个头部按钮若还留着，撤掉
+        var o1 = document.getElementById('mp-open-btn'); if (o1) o1.remove();
+        var o2 = document.getElementById('mp-mine-btn'); if (o2) o2.remove();
+    }
+    function boot() { ensureMenu(); }
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot);
+    else boot();
+
+    window._mcMoodPanel = { open: open, close: close, toggle: toggle, openMine: openMine };
+    window._mcMoodDebug = function () {
+        var c = currentContact(), st = stateOf(c.id, c.name);
+        return {
+            contact: c, dyn: st.dyn,
+            moods: st.moods.list.map(function (x) { return { k: x.k, n: x.n, main: x.main, val: x.val, has: x.has, ev: x.ev ? x.ev.t + ' +' + x.ev.v : null, left: x.until - Date.now() }; }),
+            mine: myState()
+        };
+    };
+})();
+
+</script>
+
+<style>
+.avc-mask{position:fixed;inset:0;background:rgba(0,0,0,.42);-webkit-backdrop-filter:blur(4px);backdrop-filter:blur(4px);
+z-index:20000;display:none;align-items:center;justify-content:center;padding:14px}
+html[data-theme="dark"] .avc-mask{background:rgba(0,0,0,.62)}
+.avc-mask.on{display:flex}
+/* 默认白色，跟随主题变量变化 */
+.avc-box{width:100%;max-width:340px;background:var(--secondary-bg,#ffffff);
+border:1px solid var(--border-color,#ebebeb);border-radius:18px;padding:12px;
+box-shadow:var(--shadow,0 4px 15px rgba(0,0,0,.06)),0 14px 40px rgba(0,0,0,.1);
+color:var(--text-primary,#1a1a1a)}
+.avc-hd{display:flex;align-items:center;gap:8px;margin-bottom:10px}
+.avc-ti{font-size:14px;font-weight:800;flex:1}
+.avc-x{background:none;border:0;color:var(--text-secondary,#7a7a7a);font-size:14px;cursor:pointer;padding:3px}
+.avc-stage{position:relative;width:100%;height:280px;background:var(--primary-bg,#f9f9f9);
+border:1px solid var(--border-color,#ebebeb);border-radius:12px;overflow:hidden}
+.avc-stage canvas{display:block;width:100%;height:100%;touch-action:none;cursor:move}
+.avc-frame{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
+border:1.5px solid var(--accent-color,#c9a45c);border-radius:6px;pointer-events:none}
+.avc-ctl{display:flex;align-items:center;gap:10px;margin-top:10px}
+.avc-mini{width:32px;height:32px;flex:0 0 32px;border-radius:50%;border:1px solid var(--border-color,#ebebeb);
+background:var(--primary-bg,#f9f9f9);color:var(--text-primary,#1a1a1a);cursor:pointer;font-size:12px}
+.avc-mini:hover{background:var(--secondary-bg,#fff);border-color:var(--accent-color,#c9a45c)}
+.avc-ctl input[type=range]{flex:1;accent-color:var(--accent-color,#c9a45c)}
+.avc-tip{font-size:10px;color:var(--text-secondary,#7a7a7a);margin-top:8px;text-align:center}
+.avc-btns{display:flex;gap:8px;margin-top:10px}
+.avc-b{flex:1;padding:10px;border-radius:11px;border:1px solid var(--border-color,#ebebeb);
+font-size:13px;font-weight:700;cursor:pointer;font-family:inherit}
+.avc-b.ghost{background:var(--primary-bg,#f9f9f9);color:var(--text-primary,#1a1a1a)}
+.avc-b.ok{background:var(--accent-color,#c9a45c);border-color:transparent;color:#fff}
+.avc-size{font-size:10px;color:var(--text-secondary,#7a7a7a);margin-top:7px;text-align:center}
+@media (max-width:380px){.avc-stage{height:240px}}</style>
+<script>
+
+/* =========================================================
+ *  头像上传：先裁剪（正方形）再自动压缩
+ *  window._pickAvatarWithCrop(cb, opt) —— 选图 → 裁剪 → 压缩 → 回调(base64)
+ *  不依赖外部库，纯 canvas 实现；支持拖动 / 双指缩放 / 滑块 / 旋转
+ * ========================================================= */
+(function () {
+    var mask = null, box = null;
+    var st = null;   // {img, x, y, scale, rot}
+
+    function esc(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
+
+    function ensureUI() {
+        if (mask) return mask;
+        mask = document.createElement('div');
+        mask.className = 'avc-mask';
+        mask.innerHTML = '<div class="avc-box">'
+            + '<div class="avc-hd"><span class="avc-ti">裁剪头像</span>'
+            + '<button type="button" class="avc-x" id="avc-cancel"><i class="fas fa-times"></i></button></div>'
+            + '<div class="avc-stage" id="avc-stage">'
+            + '<canvas id="avc-canvas"></canvas>'
+            + '<div class="avc-frame" id="avc-frame"></div>'
+            + '</div>'
+            + '<div class="avc-ctl">'
+            + '<button type="button" class="avc-mini" id="avc-rot" title="旋转90°"><i class="fas fa-rotate"></i></button>'
+            + '<input type="range" id="avc-zoom" min="10" max="400" value="100">'
+            + '<button type="button" class="avc-mini" id="avc-reset" title="复位"><i class="fas fa-arrows-rotate"></i></button>'
+            + '</div>'
+            + '<div class="avc-tip">拖动图片调整位置 · 双指捏合或滑块缩放</div>'
+            + '<div class="avc-btns">'
+            + '<button type="button" class="avc-b ghost" id="avc-cancel2">取消</button>'
+            + '<button type="button" class="avc-b ok" id="avc-ok"><i class="fas fa-check"></i> 使用</button>'
+            + '</div><div class="avc-size" id="avc-size"></div></div>';
+        document.body.appendChild(mask);
+        box = mask.querySelector('.avc-box');
+        mask.addEventListener('click', function (e) {
+            if (e.target === mask) close(null);
+        });
+        mask.querySelector('#avc-cancel').onclick = function () { close(null); };
+        mask.querySelector('#avc-cancel2').onclick = function () { close(null); };
+        mask.querySelector('#avc-ok').onclick = function () { doCrop(); };
+        mask.querySelector('#avc-rot').onclick = function () { st.rot = (st.rot + 90) % 360; fit(); draw(); };
+        mask.querySelector('#avc-reset').onclick = function () { st.rot = 0; st.x = 0; st.y = 0; fit(); syncZoom(); draw(); };
+        var z = mask.querySelector('#avc-zoom');
+        z.addEventListener('input', function () { st.scale = (+z.value) / 100 * st.baseScale; draw(); });
+
+        var cv = mask.querySelector('#avc-canvas');
+        var pts = {}, pinching = false, lastDist = 0, lastMid = null;
+        function dist(a, b) { return Math.hypot(a.x - b.x, a.y - b.y); }
+        cv.addEventListener('pointerdown', function (e) {
+            cv.setPointerCapture(e.pointerId);
+            pts[e.pointerId] = { x: e.clientX, y: e.clientY };
+            if (Object.keys(pts).length === 2) { pinching = true; lastDist = dist(...Object.values(pts)); lastMid = { x: (Object.values(pts)[0].x + Object.values(pts)[1].x) / 2, y: (Object.values(pts)[0].y + Object.values(pts)[1].y) / 2 }; }
+        });
+        cv.addEventListener('pointermove', function (e) {
+            if (!pts[e.pointerId]) return;
+            var prev = pts[e.pointerId];
+            pts[e.pointerId] = { x: e.clientX, y: e.clientY };
+            var ks = Object.keys(pts);
+            if (ks.length >= 2 && pinching) {
+                var v = Object.values(pts);
+                var d = dist(v[0], v[1]);
+                var mid = { x: (v[0].x + v[1].x) / 2, y: (v[0].y + v[1].y) / 2 };
+                if (lastDist > 0) { st.scale = Math.max(st.baseScale * 0.1, Math.min(st.baseScale * 4, st.scale * (d / lastDist))); }
+                st.x += mid.x - lastMid.x; st.y += mid.y - lastMid.y;
+                lastDist = d; lastMid = mid; syncZoom(); draw(); return;
+            }
+            st.x += e.clientX - prev.x; st.y += e.clientY - prev.y;
+            draw();
+        });
+        function up(e) { delete pts[e.pointerId]; if (Object.keys(pts).length < 2) pinching = false; if (!Object.keys(pts).length) lastDist = 0; }
+        cv.addEventListener('pointerup', up);
+        cv.addEventListener('pointercancel', up);
+        cv.addEventListener('wheel', function (e) {
+            e.preventDefault();
+            st.scale = Math.max(st.baseScale * 0.1, Math.min(st.baseScale * 4, st.scale * (e.deltaY > 0 ? 0.92 : 1.08)));
+            syncZoom(); draw();
+        }, { passive: false });
+        return mask;
+    }
+
+    function fit() {
+        var cv = mask.querySelector('#avc-canvas');
+        var W = cv.parentNode.clientWidth, H = cv.parentNode.clientHeight;
+        cv.width = W; cv.height = H;
+        var swap = (st.rot % 180 !== 0);
+        var iw = swap ? st.img.height : st.img.width;
+        var ih = swap ? st.img.width : st.img.height;
+        st.baseScale = Math.min(W / iw, H / ih);
+        st.scale = st.baseScale;
+        st.x = 0; st.y = 0;
+        st.cx = W / 2; st.cy = H / 2;
+        st.frame = Math.round(Math.min(W, H) * 0.78);
+        var f = mask.querySelector('#avc-frame');
+        f.style.width = st.frame + 'px'; f.style.height = st.frame + 'px';
+    }
+    function syncZoom() { var z = mask.querySelector('#avc-zoom'); if (z) z.value = Math.round(st.scale / st.baseScale * 100); }
+    function clamp() {
+        var lim = st.frame / 2;
+        st.x = Math.max(-lim, Math.min(lim, st.x));
+        st.y = Math.max(-lim, Math.min(lim, st.y));
+    }
+    function draw() {
+        clamp();
+        var cv = mask.querySelector('#avc-canvas');
+        var ctx = cv.getContext('2d');
+        ctx.clearRect(0, 0, cv.width, cv.height);
+        ctx.save();
+        ctx.translate(st.cx + st.x, st.cy + st.y);
+        ctx.rotate(st.rot * Math.PI / 180);
+        ctx.scale(st.scale, st.scale);
+        ctx.drawImage(st.img, -st.img.width / 2, -st.img.height / 2);
+        ctx.restore();
+        // 框外遮罩
+        var W = cv.width, H = cv.height, fx = st.cx - st.frame / 2, fy = st.cy - st.frame / 2;
+        ctx.fillStyle = (document.documentElement.getAttribute('data-theme') === 'dark') ? 'rgba(0,0,0,.62)' : 'rgba(255,255,255,.72)';
+        ctx.fillRect(0, 0, W, fy); ctx.fillRect(0, fy + st.frame, W, H - fy - st.frame);
+        ctx.fillRect(0, fy, fx, st.frame); ctx.fillRect(fx + st.frame, fy, W - fx - st.frame, st.frame);
+        var acc = getComputedStyle(document.documentElement).getPropertyValue('--accent-color').trim() || '#c9a45c';
+        ctx.strokeStyle = acc; ctx.lineWidth = 1.5;
+        ctx.strokeRect(fx, fy, st.frame, st.frame);
+    }
+
+    function doCrop() {
+        if (!st) return;
+        var S = st.outDim || 256;
+        var out = document.createElement('canvas');
+        out.width = S; out.height = S;
+        var ctx = out.getContext('2d');
+        ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, S, S);
+        ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high';
+        var k = S / st.frame;
+        ctx.save();
+        ctx.translate(S / 2, S / 2);
+        ctx.translate(st.x * k, st.y * k);
+        ctx.rotate(st.rot * Math.PI / 180);
+        ctx.scale(st.scale * k, st.scale * k);
+        ctx.drawImage(st.img, -st.img.width / 2, -st.img.height / 2);
+        ctx.restore();
+        var data = compress(out, st.maxBytes || (window.MAX_AVATAR_SIZE || 2 * 1024 * 1024));
+        var el = mask.querySelector('#avc-size');
+        if (el) el.textContent = '输出 ' + S + '×' + S + ' · ' + (data.length / 1024).toFixed(0) + ' KB';
+        close(data);
+    }
+
+    /* 自动压缩：优先 webp，逐级降质量/降尺寸直到小于上限 */
+    function compress(canvas, maxBytes) {
+        var S = canvas.width, q = 0.9, out;
+        var types = ['image/webp', 'image/jpeg'];
+        for (var t = 0; t < types.length; t++) {
+            var src = canvas, q2 = q;
+            for (var i = 0; i < 7; i++) {
+                try { out = src.toDataURL(types[t], q2); } catch (e) { out = null; }
+                if (!out || out.indexOf('data:image/' + types[t].split('/')[1]) !== 0) break;
+                if (out.length <= maxBytes) return out;
+                q2 -= 0.12;
+                if (q2 < 0.35) break;
+            }
+        }
+        // 还太大就缩尺寸
+        var cur = canvas;
+        for (var d = 1; d <= 4; d++) {
+            var ns = Math.max(96, Math.round(S * Math.pow(0.75, d)));
+            var tmp = document.createElement('canvas');
+            tmp.width = ns; tmp.height = ns;
+            var tc = tmp.getContext('2d');
+            tc.imageSmoothingEnabled = true; tc.imageSmoothingQuality = 'high';
+            tc.drawImage(cur, 0, 0, ns, ns);
+            cur = tmp;
+            var r = compressAt(cur, maxBytes);
+            if (r) return r;
+        }
+        return cur.toDataURL('image/jpeg', 0.6);
+    }
+    function compressAt(canvas, maxBytes) {
+        var types = ['image/webp', 'image/jpeg'], q;
+        for (var t = 0; t < types.length; t++) {
+            q = 0.88;
+            for (var i = 0; i < 6; i++) {
+                var out;
+                try { out = canvas.toDataURL(types[t], q); } catch (e) { continue; }
+                if (out.indexOf('data:image/' + types[t].split('/')[1]) === 0 && out.length <= maxBytes) return out;
+                q -= 0.12; if (q < 0.35) break;
+            }
+        }
+        return null;
+    }
+
+    var cbFn = null;
+    function close(v) { if (mask) mask.classList.remove('on'); var f = cbFn; cbFn = null; if (f) f(v || null); }
+
+    window._pickAvatarWithCrop = function (cb, opt) {
+        opt = opt || {};
+        var input = document.createElement('input');
+        input.type = 'file'; input.accept = 'image/*';
+        input.onchange = function (e) {
+            var file = e.target.files && e.target.files[0];
+            if (!file) return;
+            var fr = new FileReader();
+            fr.onload = function (ev) {
+                var img = new Image();
+                img.onload = function () {
+                    ensureUI();
+                    st = { img: img, x: 0, y: 0, scale: 1, baseScale: 1, rot: 0, cx: 0, cy: 0, frame: 100,
+                           outDim: opt.maxDim || 256, maxBytes: opt.maxBytes || (window.MAX_AVATAR_SIZE || 2 * 1024 * 1024) };
+                    mask.classList.add('on');
+                    requestAnimationFrame(function () { fit(); syncZoom(); draw(); });
+                    cbFn = function (v) { cb(v, file); };
+                };
+                img.onerror = function () { if (typeof showNotification === 'function') showNotification('图片读取失败', 'error'); };
+                img.src = ev.target.result;
+            };
+            fr.readAsDataURL(file);
+        };
+        input.click();
+    };
+    window._avatarCompressCanvas = compress;
+})();
+
 </script>
 </body>
  </html>
